@@ -42,8 +42,36 @@ const defaultRules = [
     nightRate: 80,
   },
   {
-    department: "MKT",
+    department: "SENIOR MKT",
     flatRate: 100,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+  {
+    department: "MKT",
+    flatRate: 50,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+  {
+    department: "OPERATION",
+    flatRate: 50,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+  {
+    department: "MAID",
+    flatRate: 0,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+  {
+    department: "MANAGER",
+    flatRate: 0,
     bufferHours: 1,
     useNightRate: false,
     nightRate: 0,
@@ -879,12 +907,13 @@ async function deleteRule(department) {
 async function saveRuleFromForm() {
   if (!document.querySelector("#ruleDepartment")) return;
   const department = document.querySelector("#ruleDepartment").value.trim().toUpperCase();
-  const flatRate = Number(document.querySelector("#ruleFlatRate").value);
+  const flatRateInput = document.querySelector("#ruleFlatRate").value.trim();
+  const flatRate = Number(flatRateInput);
   const bufferHours = Number(document.querySelector("#ruleBufferHours").value || 1);
   const useNightRate = document.querySelector("#ruleUseNightRate").checked;
   const nightRate = Number(document.querySelector("#ruleNightRate").value || 0);
 
-  if (!department || !flatRate) {
+  if (!department || flatRateInput === "" || Number.isNaN(flatRate)) {
     alert("กรุณากรอกรหัสแผนกและค่า OT/ชม.");
     return;
   }
