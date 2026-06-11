@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NSC OT Settings</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <img src="../liff-register-mock/assets/nsc-logo.svg" alt="NSC Specialist Surgery" />
+        <div>
+          <p>Payroll Audit Tool</p>
+          <h1>Settings การคำนวณ OT</h1>
+        </div>
+      </header>
+
+      <nav class="page-nav" aria-label="OT calculator navigation">
+        <a href="./index.html">คำนวณ OT</a>
+        <a class="active" href="./settings.html">Settings</a>
+        <a href="./history.html">History</a>
+      </nav>
+
+      <section class="panel settings-panel">
+        <div class="panel-head">
+          <div>
+            <p>Daily case setting</p>
+            <h2>ตั้งค่าเคสสุดท้ายของวัน</h2>
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <label>
+            เลือกวันที่ของเคส
+            <span class="calendar-field">
+              <input id="caseDate" inputmode="numeric" placeholder="dd/mm/yyyy" readonly />
+              <button id="openCaseDatePicker" type="button" class="soft-button icon-button" aria-label="เลือกวันที่">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 2v4M16 2v4M3.5 9.5h17M5.5 4.5h13a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-14a2 2 0 0 1 2-2Z" />
+                </svg>
+              </button>
+              <input id="caseDateNative" class="native-date-input" type="date" aria-label="เลือกวันที่ของเคส" />
+            </span>
+          </label>
+          <div class="grid-two">
+            <label>
+              ทำอะไร
+              <input id="lastCaseTask" placeholder="เช่น เคสผ่าตัด / Consult / Aftercare" />
+            </label>
+            <label>
+              เสร็จกี่โมง
+              <span class="time-pair">
+                <input id="lastCaseHour" inputmode="numeric" maxlength="2" placeholder="22" />
+                <span>:</span>
+                <input id="lastCaseMinute" inputmode="numeric" maxlength="2" placeholder="30" />
+              </span>
+            </label>
+          </div>
+          <label>
+            รายละเอียดเพิ่มเติม
+            <input id="lastCaseNote" placeholder="เช่น เคสสุดท้ายเสร็จช้าเพราะรอคนไข้ฟื้นตัว" />
+          </label>
+          <button id="saveCaseButton" type="button" class="primary-button">บันทึกเคสของวันนี้</button>
+          <p id="caseSaveMessage" class="import-message"></p>
+          <p class="hint">ค่านี้จะถูกใช้กับทุกคนที่ Check-in ผ่าน LINE ของวันนั้น ถ้า Excel ไม่ได้ใส่ `Last_Case_End` รายคน</p>
+        </div>
+      </section>
+
+      <section class="panel settings-panel">
+        <div class="panel-head">
+          <div>
+            <p>Department rules</p>
+            <h2>ตั้งค่าแผนกและค่า OT</h2>
+          </div>
+          <div class="head-actions">
+            <button id="newRuleButton" type="button" class="soft-button">เพิ่มแผนกใหม่</button>
+            <button id="resetRulesButton" type="button" class="soft-button">คืนค่าเริ่มต้น</button>
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <h3>เพิ่ม/แก้กฎแผนก</h3>
+          <div class="department-form">
+            <label>
+              รหัสแผนก
+              <input id="ruleDepartment" placeholder="เช่น HR" />
+            </label>
+            <label>
+              ค่า OT/ชม.
+              <input id="ruleFlatRate" inputmode="numeric" placeholder="50" />
+            </label>
+            <label>
+              อยู่หลังเคสได้กี่ชม.
+              <input id="ruleBufferHours" inputmode="numeric" placeholder="1" />
+            </label>
+            <label>
+              Rate กลางคืน/ชม.
+              <input id="ruleNightRate" inputmode="numeric" placeholder="เฉพาะ OR เช่น 80" />
+            </label>
+            <label class="check-row">
+              <input id="ruleUseNightRate" type="checkbox" />
+              <span>ใช้ Rate พิเศษ 23:00-08:00</span>
+            </label>
+            <button id="saveRuleButton" type="button" class="secondary-button">บันทึกกฎแผนก</button>
+          </div>
+          <p id="ruleSaveMessage" class="import-message"></p>
+        </div>
+
+        <div class="rules-table-wrap">
+          <table class="rules-table">
+            <thead>
+              <tr>
+                <th>แผนก</th>
+                <th>OT/ชม.</th>
+                <th>กลางคืน</th>
+                <th>อยู่หลังเคสได้</th>
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="rulesBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel settings-panel">
+        <div class="panel-head">
+          <div>
+            <p>Late rule</p>
+            <h2>ตั้งค่ากฎมาสาย</h2>
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <label>
+            หักนาทีละกี่บาท
+            <input id="lateRatePerMinute" inputmode="numeric" placeholder="2" />
+          </label>
+          <label>
+            นาทีสายฟรีต่อเดือน
+            <input id="lateMonthlyFreeMinutes" inputmode="numeric" placeholder="15" />
+          </label>
+          <button id="saveLateRuleButton" type="button" class="primary-button">บันทึกกฎมาสาย</button>
+          <p id="lateRuleMessage" class="import-message"></p>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

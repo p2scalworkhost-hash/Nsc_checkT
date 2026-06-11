@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NSC OT Calculator</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <img src="../liff-register-mock/assets/nsc-logo.svg" alt="NSC Specialist Surgery" />
+        <div>
+          <p>Payroll Audit Tool</p>
+          <h1>คำนวณ OT และตรวจเวลาอยู่เกินเคส</h1>
+        </div>
+      </header>
+
+      <nav class="page-nav" aria-label="OT calculator navigation">
+        <a class="active" href="./index.html">คำนวณ OT</a>
+        <a href="./settings.html">Settings</a>
+        <a href="./history.html">History</a>
+      </nav>
+
+      <section class="panel controls-panel">
+        <div class="panel-head">
+          <div>
+            <p>Excel import</p>
+            <h2>นำเข้าข้อมูลพนักงาน</h2>
+          </div>
+          <button id="loadSampleButton" type="button" class="soft-button">โหลดตัวอย่าง</button>
+        </div>
+
+        <label class="upload-box">
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+          <strong>เลือกไฟล์ Excel</strong>
+          <span>รองรับคอลัมน์: วันที่, ชื่อ, แผนก, เวลาเข้า/ออกจริง, เวลาเคสสุดท้ายเสร็จ</span>
+        </label>
+
+        <button id="calculateButton" class="primary-button" type="button">คำนวณ OT</button>
+        <p id="importMessage" class="import-message"></p>
+      </section>
+
+      <section class="rules-grid">
+        <article id="caseSummaryCard">
+          <span>DATE SOURCE</span>
+          <strong>Excel Date</strong>
+          <p>ใช้วันที่จาก Excel เพื่อเทียบ LIFF History และเคสสุดท้ายรายวัน</p>
+        </article>
+        <article>
+          <span>RULES</span>
+          <strong id="rulesCount">0 แผนก</strong>
+          <p>ตั้งค่า OT และ buffer รายแผนกได้จาก Setting</p>
+        </article>
+        <article>
+          <span>CHECK</span>
+          <strong>HR Review</strong>
+          <p>ถ้าอยู่เกิน buffer หลังเคสสุดท้าย ให้ขึ้นเตือน HR ตรวจ</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p>Calculation result</p>
+            <h2>สรุปรายการ OT</h2>
+          </div>
+          <div class="summary-pill">
+            <span id="totalPeople">0 คน</span>
+            <strong id="totalAmount">0 บาท</strong>
+          </div>
+        </div>
+        <p class="hint">ระบบใช้วันที่จาก Excel ต่อแถวเพื่อดึงเวลาเริ่มงานจาก LIFF History และดึงเคสสุดท้ายรายวันจาก Settings</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>พนักงาน</th>
+                <th>วันที่</th>
+                <th>แผนก</th>
+                <th>เริ่ม</th>
+                <th>ออกจริง</th>
+                <th>มาสาย</th>
+                <th>ออกก่อนเวลา</th>
+                <th>OT</th>
+                <th>เงิน OT</th>
+                <th>ตรวจเวลาเคส</th>
+              </tr>
+            </thead>
+            <tbody id="resultBody">
+              <tr>
+                <td colspan="10" class="empty-state">ยังไม่มีข้อมูล กดโหลดตัวอย่างหรือเลือกไฟล์ Excel</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel notes-panel">
+        <h2>รูปแบบ Excel ที่แนะนำ</h2>
+        <p>ใช้ได้ทั้งไฟล์สแกนนิ้วรายเดือนที่ row 2 เป็นวันที่ เช่น `4-1`, `4-2` และไฟล์แบบมีคอลัมน์ด้านล่าง</p>
+        <div class="sample-columns">
+          <code>Name</code>
+          <code>Date</code>
+          <code>Department</code>
+          <code>Scan_In</code>
+          <code>Scan_Out</code>
+          <code>Last_Case_End</code>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

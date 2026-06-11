@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NSC OT History</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <img src="../liff-register-mock/assets/nsc-logo.svg" alt="NSC Specialist Surgery" />
+        <div>
+          <p>Payroll Audit Tool</p>
+          <h1>History จาก LIFF และเคสสุดท้าย</h1>
+        </div>
+      </header>
+
+      <nav class="page-nav" aria-label="OT calculator navigation">
+        <a href="./index.html">คำนวณ OT</a>
+        <a href="./settings.html">Settings</a>
+        <a class="active" href="./history.html">History</a>
+      </nav>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p>Line LIFF history</p>
+            <h2>ประวัติที่พนักงานกดจาก LIFF</h2>
+          </div>
+          <button id="clearLiffHistoryButton" type="button" class="soft-button">ล้างประวัติ LIFF</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>วันที่</th>
+                <th>พนักงาน</th>
+                <th>แผนก</th>
+                <th>สถานะ</th>
+                <th>เวลาเริ่ม/เลิก</th>
+                <th>OT</th>
+                <th>ส่งเมื่อ</th>
+              </tr>
+            </thead>
+            <tbody id="liffHistoryBody">
+              <tr>
+                <td colspan="7" class="empty-state">ยังไม่มีประวัติจาก LIFF</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p>Last case history</p>
+            <h2>ประวัติเคสสุดท้ายรายวัน</h2>
+          </div>
+          <button id="clearCaseHistoryButton" type="button" class="soft-button">ล้างประวัติเคส</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>วันที่</th>
+                <th>ทำอะไร</th>
+                <th>เวลาเสร็จ</th>
+                <th>รายละเอียด</th>
+              </tr>
+            </thead>
+            <tbody id="caseHistoryBody">
+              <tr>
+                <td colspan="4" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

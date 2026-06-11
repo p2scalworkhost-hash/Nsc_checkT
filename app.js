@@ -1,0 +1,1209 @@
+const rows = [];
+const RULES_KEY = "nsc-ot-department-rules";
+const CASE_SETTING_KEY = "nsc-ot-last-case-setting";
+const LIFF_HISTORY_KEY = "nsc-liff-attendance-history";
+const LATE_RULE_KEY = "nsc-late-rule";
+
+// Firebase Configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDYMkvTCHQ0oRuYANj1Axc_z6HrRkbxCnI",
+  authDomain: "p2sowen.firebaseapp.com",
+  databaseURL: "https://p2sowen-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "p2sowen",
+  storageBucket: "p2sowen.firebasestorage.app",
+  messagingSenderId: "432340752812",
+  appId: "1:432340752812:web:4cd4a2fc8182a111680209",
+  measurementId: "G-KD8M18YTFW"
+};
+
+let db = null;
+let rulesCache = null;
+let lateRuleCache = null;
+let lastCasesCache = {};
+let liffHistoryCache = [];
+
+// Initialize Firebase
+try {
+  if (typeof firebase !== "undefined") {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    console.log("Firebase Firestore initialized successfully.");
+  }
+} catch (err) {
+  console.error("Firebase initialization failed:", err);
+}
+
+const defaultRules = [
+  {
+    department: "OR",
+    flatRate: 50,
+    bufferHours: 2,
+    useNightRate: true,
+    nightRate: 80,
+  },
+  {
+    department: "MKT",
+    flatRate: 100,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+  {
+    department: "OTHER",
+    flatRate: 50,
+    bufferHours: 1,
+    useNightRate: false,
+    nightRate: 0,
+  },
+];
+
+const sampleRows = [
+  {
+    workDate: todayInputValue(),
+    name: "ศศิกาญจน์ ชีวมงคลกานต์",
+    department: "OR",
+    startTime: "08:00",
+    scanIn: "08:01",
+    scanOut: "23:45",
+    lastCaseEnd: "21:30",
+  },
+  {
+    workDate: todayInputValue(),
+    name: "Grace ABC",
+    department: "MKT",
+    startTime: "09:00",
+    scanIn: "09:02",
+    scanOut: "20:30",
+    lastCaseEnd: "19:00",
+  },
+  {
+    workDate: todayInputValue(),
+    name: "มนัญญา สุขสิทธิ์",
+    department: "CS",
+    startTime: "08:00",
+    scanIn: "07:58",
+    scanOut: "18:15",
+    lastCaseEnd: "17:30",
+  },
+  {
+    workDate: todayInputValue(),
+    name: "เพ็ญโฉม สุขสิทธิ์",
+    department: "OR",
+    startTime: "09:00",
+    scanIn: "08:55",
+    scanOut: "01:30",
+    lastCaseEnd: "22:30",
+  },
+];
+
+const columnAliases = {
+  workDate: ["date", "work_date", "วันที่", "วัน", "workdate"],
+  name: ["name", "ชื่อ", "ชื่อพนักงาน", "พนักงาน", "employee", "employee_name"],
+  department: ["department", "dept", "แผนก"],
+  startTime: ["start_time", "start", "เวลาเริ่มงาน", "เริ่มงาน"],
+  scanIn: ["scan_in", "in", "เวลาเข้าจริง", "เวลาเข้า", "เข้าจริง"],
+  scanOut: ["scan_out", "out", "เวลาออกจริง", "เวลาออก", "ออกจริง"],
+  lastCaseEnd: ["last_case_end", "case_end", "เวลาเคสสุดท้ายเสร็จ", "เคสสุดท้าย"],
+};
+
+function todayInputValue() {
+  const now = new Date();
+  const timezoneOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
+}
+
+function formatDisplayDate(dateValue) {
+  const isoDate = normalizeDate(dateValue);
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return dateValue || "-";
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function parseDisplayDate(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return normalizeDate(text);
+  return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+}
+
+function loadRules() {
+  return rulesCache && rulesCache.length ? rulesCache : defaultRules;
+}
+
+async function saveRules(rules) {
+  rulesCache = rules;
+  localStorage.setItem(RULES_KEY, JSON.stringify(rules));
+  if (db) {
+    try {
+      await db.collection("settings").doc("rules").set({ rules });
+      console.log("Rules saved to Firebase Firestore.");
+    } catch (err) {
+      console.error("Failed to save rules to Firestore:", err);
+    }
+  }
+}
+
+function loadCaseSetting() {
+  return { byDate: lastCasesCache };
+}
+
+function loadCaseSettingForDate(dateValue = getActiveWorkDate()) {
+  return lastCasesCache[dateValue] || {};
+}
+
+async function saveCaseSettingForDate(dateValue, setting) {
+  lastCasesCache[dateValue] = { ...setting, date: dateValue };
+  localStorage.setItem(CASE_SETTING_KEY, JSON.stringify({ byDate: lastCasesCache }));
+  if (db) {
+    try {
+      await db.collection("last_cases").doc(dateValue).set({ ...setting, date: dateValue });
+      console.log("Case setting saved to Firebase Firestore.");
+    } catch (err) {
+      console.error("Failed to save case setting to Firestore:", err);
+    }
+  }
+}
+
+function loadLiffHistory() {
+  return liffHistoryCache;
+}
+
+function loadLateRule() {
+  return lateRuleCache || { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+}
+
+async function saveLateRule(rule) {
+  lateRuleCache = rule;
+  localStorage.setItem(LATE_RULE_KEY, JSON.stringify(rule));
+  if (db) {
+    try {
+      await db.collection("settings").doc("late_rule").set(rule);
+      console.log("Late rule saved to Firebase Firestore.");
+    } catch (err) {
+      console.error("Failed to save late rule to Firestore:", err);
+    }
+  }
+}
+
+function getActiveWorkDate() {
+  return parseDisplayDate(document.querySelector("#caseDate")?.value || todayInputValue());
+}
+
+function openCaseDatePicker() {
+  const nativeInput = document.querySelector("#caseDateNative");
+  if (!nativeInput) return;
+
+  if (typeof nativeInput.showPicker === "function") {
+    try {
+      nativeInput.showPicker();
+      return;
+    } catch {
+      // Fall through to click for browsers that expose showPicker but block it.
+    }
+  }
+
+  nativeInput.focus();
+  nativeInput.click();
+}
+
+function normalizeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+function getCell(record, field) {
+  const keys = Object.keys(record);
+  const aliases = columnAliases[field].map(normalizeKey);
+  const foundKey = keys.find((key) => aliases.includes(normalizeKey(key)));
+  return foundKey ? record[foundKey] : "";
+}
+
+function normalizeRecord(record) {
+  return {
+    workDate: normalizeDate(getCell(record, "workDate")),
+    name: String(getCell(record, "name") || "").trim(),
+    department: String(getCell(record, "department") || "").trim().toUpperCase(),
+    startTime: normalizeTime(getCell(record, "startTime")),
+    scanIn: normalizeTime(getCell(record, "scanIn")),
+    scanOut: normalizeTime(getCell(record, "scanOut")),
+    lastCaseEnd: normalizeTime(getCell(record, "lastCaseEnd")),
+  };
+}
+
+function normalizeDate(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number") {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    excelEpoch.setUTCDate(excelEpoch.getUTCDate() + value);
+    return excelEpoch.toISOString().slice(0, 10);
+  }
+
+  const text = String(value).trim();
+  const isoMatch = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, "0")}-${isoMatch[3].padStart(2, "0")}`;
+  }
+
+  const thaiMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (thaiMatch) {
+    return `${thaiMatch[3]}-${thaiMatch[2].padStart(2, "0")}-${thaiMatch[1].padStart(2, "0")}`;
+  }
+
+  const shortMatch = text.match(/^(\d{1,2})[-/](\d{1,2})$/);
+  if (shortMatch) {
+    const year = new Date().getFullYear();
+    return `${year}-${shortMatch[1].padStart(2, "0")}-${shortMatch[2].padStart(2, "0")}`;
+  }
+
+  return text;
+}
+
+function parseYearFromFileName(fileName) {
+  const match = String(fileName || "").match(/(20\d{2})\d{4}/);
+  return match ? Number(match[1]) : new Date().getFullYear();
+}
+
+function dateFromMonthlyHeader(value, fileName) {
+  const match = String(value || "").trim().match(/^(\d{1,2})-(\d{1,2})$/);
+  if (!match) return "";
+  return `${parseYearFromFileName(fileName)}-${match[1].padStart(2, "0")}-${match[2].padStart(2, "0")}`;
+}
+
+function extractTimesFromScanCell(value) {
+  const text = String(value || "");
+  return [...text.matchAll(/\b\d{1,2}:\d{2}\b/g)]
+    .map((match) => normalizeTime(match[0]))
+    .filter(Boolean);
+}
+
+function parseMonthlyScanRows(matrix, fileName) {
+  const header = matrix[1] || [];
+  const parsedRows = [];
+
+  for (const row of matrix.slice(2)) {
+    const name = String(row[0] || "").trim();
+    if (!name || name.includes("NSC Clinic")) continue;
+
+    for (let col = 1; col < header.length; col += 1) {
+      const workDate = dateFromMonthlyHeader(header[col], fileName);
+      if (!workDate) continue;
+
+      const times = extractTimesFromScanCell(row[col]);
+      if (!times.length) continue;
+
+      parsedRows.push({
+        workDate,
+        name,
+        department: "",
+        startTime: "",
+        scanIn: times[0],
+        scanOut: times[times.length - 1],
+        lastCaseEnd: "",
+      });
+    }
+  }
+
+  return parsedRows;
+}
+
+function normalizeTime(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (typeof value === "number") {
+    const totalMinutes = Math.round(value * 24 * 60);
+    return minutesToTime(totalMinutes);
+  }
+
+  const text = String(value).trim().replace(".", ":");
+  const match = text.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) return "";
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2] || "0");
+  if (hour < 0 || hour > 24 || minute < 0 || minute > 59) return "";
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function timeToMinutes(time, referenceStart = 0) {
+  const [hour, minute] = time.split(":").map(Number);
+  let total = hour * 60 + minute;
+  if (total < referenceStart) total += 24 * 60;
+  return total;
+}
+
+function sameDayTimeToMinutes(time) {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function minutesToTime(totalMinutes) {
+  const hour = Math.floor(totalMinutes / 60) % 24;
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function formatDuration(minutes) {
+  if (minutes <= 0) return "0 นาที";
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  if (!hour) return `${minute} นาที`;
+  if (!minute) return `${hour} ชม.`;
+  return `${hour} ชม. ${minute} นาที`;
+}
+
+function roundMinutes(minutes) {
+  const mode = document.querySelector("#roundingMode")?.value || "actual";
+  if (mode === "floor15") return Math.floor(minutes / 15) * 15;
+  if (mode === "floor30") return Math.floor(minutes / 30) * 30;
+  return minutes;
+}
+
+function getGlobalLastCaseTime(dateValue = getActiveWorkDate()) {
+  const saved = loadCaseSettingForDate(dateValue);
+  const hour = (document.querySelector("#lastCaseHour")?.value || saved.hour || "22").trim().padStart(2, "0");
+  const minute = (document.querySelector("#lastCaseMinute")?.value || saved.minute || "30").trim().padStart(2, "0");
+  return normalizeTime(`${hour}:${minute}`);
+}
+
+function getSavedLastCaseTime(dateValue) {
+  const saved = loadCaseSettingForDate(dateValue);
+  if (!saved.hour && !saved.minute) return "";
+  const hour = String(saved.hour || "0").trim().padStart(2, "0");
+  const minute = String(saved.minute || "0").trim().padStart(2, "0");
+  return normalizeTime(`${hour}:${minute}`);
+}
+
+function getDepartmentRule(department) {
+  const normalized = String(department || "").trim().toUpperCase();
+  const rules = loadRules();
+  const matched = rules.find((rule) => rule.department === normalized);
+  const fallback = rules.find((rule) => rule.department === "OTHER") || defaultRules[2];
+  const rule = matched || fallback;
+
+  return {
+    ...rule,
+    label: matched ? rule.department : "OTHER",
+    bufferMinutes: Number(rule.bufferHours || 1) * 60,
+  };
+}
+
+function calculateSplitRateAmount(otStart, otEnd, rule) {
+  const nightStart = 23 * 60;
+  const nextMorning = 32 * 60;
+  const cappedEnd = Math.min(otEnd, nextMorning);
+  const baseBeforeNight = Math.max(0, Math.min(cappedEnd, nightStart) - otStart);
+  const nightMinutes = Math.max(0, Math.min(cappedEnd, nextMorning) - Math.max(otStart, nightStart));
+  const afterMorningMinutes = Math.max(0, otEnd - nextMorning);
+
+  const baseRounded = roundMinutes(baseBeforeNight);
+  const nightRounded = roundMinutes(nightMinutes);
+
+  return {
+    amount: (baseRounded / 60) * Number(rule.flatRate || 0) + (nightRounded / 60) * Number(rule.nightRate || 0),
+    paidMinutes: baseRounded + nightRounded,
+    breakdown: [
+      baseRounded ? `${rule.flatRate} บาท: ${formatDuration(baseRounded)}` : "",
+      nightRounded ? `${rule.nightRate} บาท: ${formatDuration(nightRounded)}` : "",
+      afterMorningMinutes ? `หลัง 08:00 นับเป็นวันใหม่: ${formatDuration(afterMorningMinutes)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" / "),
+  };
+}
+
+function calculateRow(row) {
+  const liffLog = findLiffLog(row);
+  const startTime = row.startTime || liffLog?.plannedStartTime || "";
+  const department = row.department || liffLog?.department || "";
+  const workDate = row.workDate || liffLog?.workDate || "";
+  const rule = getDepartmentRule(department);
+  if (!startTime) {
+    return {
+      ...row,
+      workDate,
+      liffLog,
+      missingStartTime: true,
+      rule,
+    };
+  }
+
+  const startMinutes = sameDayTimeToMinutes(startTime);
+  const scanInMinutes = row.scanIn ? sameDayTimeToMinutes(row.scanIn) : null;
+  const lateRule = loadLateRule();
+  const rawLateMinutes = scanInMinutes === null ? null : Math.max(0, scanInMinutes - startMinutes);
+  const lateMinutes = rawLateMinutes;
+  const lateDeduction = lateMinutes === null ? 0 : lateMinutes * Number(lateRule.ratePerMinute || 0);
+  const scheduledEnd = startMinutes + 9 * 60;
+  const outMinutes = timeToMinutes(row.scanOut, startMinutes);
+  const earlyLeaveMinutes = Math.max(0, scheduledEnd - outMinutes);
+  const actualOtMinutes = roundMinutes(Math.max(0, outMinutes - scheduledEnd));
+  const lastCaseTime = row.lastCaseEnd || getSavedLastCaseTime(workDate);
+  const missingLastCase = !lastCaseTime;
+  const lastCaseMinutes = lastCaseTime ? timeToMinutes(lastCaseTime, startMinutes) : null;
+  const cutoff = lastCaseMinutes === null ? null : lastCaseMinutes + rule.bufferMinutes;
+  const overCaseLimit = cutoff !== null && outMinutes > cutoff;
+  const hasOtIntent = Boolean(liffLog?.employeeOtIntent);
+  const hasOtWithoutIntent = actualOtMinutes > 0 && !hasOtIntent;
+  const payableOutMinutes = cutoff === null ? outMinutes : Math.min(outMinutes, cutoff);
+  let payableOtMinutes = hasOtIntent ? roundMinutes(Math.max(0, payableOutMinutes - scheduledEnd)) : 0;
+  const excessAfterCaseMinutes = cutoff === null ? 0 : Math.max(0, outMinutes - cutoff);
+
+  let amount = 0;
+  let breakdown = "";
+
+  if (missingLastCase) {
+    amount = 0;
+    payableOtMinutes = 0;
+    breakdown = "ยังไม่มีข้อมูลเคสสุดท้าย";
+  } else if (!hasOtIntent) {
+    amount = 0;
+    breakdown = "ยังไม่กดว่ามี OT";
+  } else if (rule.useNightRate) {
+    const splitResult = calculateSplitRateAmount(scheduledEnd, payableOutMinutes, rule);
+    amount = splitResult.amount;
+    payableOtMinutes = splitResult.paidMinutes;
+    breakdown = splitResult.breakdown;
+  } else {
+    amount = (payableOtMinutes / 60) * rule.flatRate;
+    breakdown = `${rule.flatRate} บาท: ${formatDuration(payableOtMinutes)}`;
+  }
+
+  return {
+    ...row,
+    rowKey: row.rowKey,
+    workDate,
+    startTime,
+    department,
+    liffLog,
+    scanIn: row.scanIn,
+    lateMinutes,
+    lateDeductibleMinutes: lateMinutes || 0,
+    monthlyLateMinutes: lateMinutes || 0,
+    monthlyFreeMinutes: Number(lateRule.monthlyFreeMinutes || 0),
+    lateDeduction,
+    earlyLeaveMinutes,
+    lateRule,
+    rule,
+    scheduledEnd: minutesToTime(scheduledEnd),
+    actualOtMinutes,
+    payableOtMinutes,
+    excessAfterCaseMinutes,
+    hasOtIntent,
+    hasOtWithoutIntent,
+    amount,
+    breakdown,
+    lastCaseTime,
+    missingLastCase,
+    cutoff: cutoff === null ? "" : minutesToTime(cutoff),
+    overCaseLimit,
+    newDayAfter8: rule.useNightRate && outMinutes > 32 * 60,
+  };
+}
+
+function normalizeName(value) {
+  return String(value || "").replace(/\s+/g, "").toLowerCase();
+}
+
+function getExcelDateKey(dateValue) {
+  if (!dateValue) return "";
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+function findLiffLog(row) {
+  const history = loadLiffHistory();
+  const rowName = normalizeName(row.name);
+  const rowDate = row.workDate;
+  const rowDateKey = getExcelDateKey(rowDate);
+
+  return history.find((item) => {
+    const sameDate = item.workDate === rowDate || item.excelDateKey === rowDateKey;
+    const sameName = normalizeName(item.fullName) === rowName || normalizeName(item.nickname) === rowName;
+    return sameDate && sameName;
+  });
+}
+
+function getMonthKey(dateValue) {
+  const normalized = normalizeDate(dateValue);
+  const match = normalized.match(/^(\d{4})-(\d{2})-/);
+  return match ? `${match[1]}-${match[2]}` : "";
+}
+
+function applyMonthlyLatePolicy(calculated) {
+  const lateRule = loadLateRule();
+  const freeMinutes = Number(lateRule.monthlyFreeMinutes || 0);
+  const ratePerMinute = Number(lateRule.ratePerMinute || 0);
+  const groups = new Map();
+
+  for (const row of calculated) {
+    const key = `${normalizeName(row.name)}-${getMonthKey(row.workDate)}`;
+    if (!row.name || !getMonthKey(row.workDate) || !row.lateMinutes) {
+      row.lateDeductibleMinutes = 0;
+      row.monthlyLateMinutes = row.lateMinutes || 0;
+      row.monthlyFreeMinutes = freeMinutes;
+      row.lateDeduction = 0;
+      continue;
+    }
+
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  for (const groupRows of groups.values()) {
+    groupRows.sort((a, b) => String(a.workDate).localeCompare(String(b.workDate)));
+    const monthlyLateMinutes = groupRows.reduce((sum, row) => sum + Number(row.lateMinutes || 0), 0);
+    let freeRemaining = freeMinutes;
+
+    for (const row of groupRows) {
+      const lateMinutes = Number(row.lateMinutes || 0);
+      const freeUsed = Math.min(freeRemaining, lateMinutes);
+      const deductibleMinutes = Math.max(0, lateMinutes - freeUsed);
+      freeRemaining = Math.max(0, freeRemaining - freeUsed);
+
+      row.monthlyLateMinutes = monthlyLateMinutes;
+      row.monthlyFreeMinutes = freeMinutes;
+      row.lateDeductibleMinutes = deductibleMinutes;
+      row.lateDeduction = deductibleMinutes * ratePerMinute;
+    }
+  }
+
+  return calculated;
+}
+
+function render() {
+  const body = document.querySelector("#resultBody");
+  const calculated = applyMonthlyLatePolicy(rows.filter((row) => row.name && row.scanOut).map(calculateRow));
+
+  if (!calculated.length) {
+    body.innerHTML = `<tr><td colspan="10" class="empty-state">ยังไม่มีข้อมูล กดโหลดตัวอย่างหรือเลือกไฟล์ Excel</td></tr>`;
+    updateSummary([]);
+    return;
+  }
+
+  body.innerHTML = calculated.map(renderRow).join("");
+  bindDepartmentSelects();
+  updateSummary(calculated);
+}
+
+function bindDepartmentSelects() {
+  for (const select of document.querySelectorAll(".department-select")) {
+    select.addEventListener("change", () => {
+      const row = rows.find((item) => item.rowKey === select.dataset.rowKey);
+      if (!row) return;
+      row.department = select.value;
+      render();
+    });
+  }
+}
+
+function renderRow(row) {
+  if (row.missingStartTime) {
+    return `
+        <tr>
+          <td><strong>${escapeHtml(row.name)}</strong></td>
+        <td>${escapeHtml(formatDisplayDate(row.workDate))}</td>
+        <td>${escapeHtml(row.rule?.label || row.department || "-")}</td>
+        <td><span class="status danger">ไม่พบเวลาเริ่มจาก LIFF/Excel</span></td>
+        <td>${row.scanOut || "-"}</td>
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        <td class="amount">0 บาท</td>
+        <td><span class="status danger">ต้องมี History LIFF หรือ Start_Time</span></td>
+      </tr>
+    `;
+  }
+
+  const statusClass = row.hasOtWithoutIntent || row.overCaseLimit || row.missingLastCase ? "warn" : "ok";
+  const statusText = row.hasOtWithoutIntent
+    ? "สแกนเกิน แต่ LIFF ไม่ได้กด OT"
+    : row.missingLastCase
+      ? "ยังไม่มีข้อมูลเคสสุดท้ายของวันนี้"
+      : row.overCaseLimit
+        ? "เกินเวลาเคส ให้ HR ตรวจ"
+        : "อยู่ในเงื่อนไข";
+  const newDayNote = row.newDayAfter8 ? `<div class="status warn">หลัง 08:00 นับวันใหม่</div>` : "";
+  const excessNote = row.excessAfterCaseMinutes
+    ? `<div class="status warn">เกิน cutoff ${formatDuration(row.excessAfterCaseMinutes)} ไม่คิดเงินอัตโนมัติ</div>`
+    : "";
+  const noOtIntentNote = row.hasOtWithoutIntent
+    ? `<div class="status warn">ไม่คิดเงิน เพราะไม่ได้กดว่ามี OT</div>`
+    : "";
+
+  return `
+    <tr>
+      <td><strong>${escapeHtml(row.name)}</strong></td>
+      <td>${escapeHtml(formatDisplayDate(row.workDate))}</td>
+      <td>${renderDepartmentSelect(row)}</td>
+      <td>${row.startTime}<br><small>เลิกปกติ ${row.scheduledEnd}</small>${row.liffLog ? '<br><small>จาก LIFF</small>' : ""}</td>
+      <td>${row.scanOut}</td>
+      <td>${renderLateCell(row)}</td>
+      <td>${renderEarlyLeaveCell(row)}</td>
+      <td>
+        คิดเงินได้ ${formatDuration(row.payableOtMinutes)}<br>
+        <small>สแกนจริง ${formatDuration(row.actualOtMinutes)}</small><br>
+        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}
+      </td>
+      <td class="amount">${formatMoney(row.amount)}</td>
+      <td>
+        เคสเสร็จ ${row.lastCaseTime || "-"}<br>
+        <small>ควรออกไม่เกิน ${row.cutoff || "-"}</small><br>
+        <span class="status ${statusClass}">${statusText}</span>
+      </td>
+    </tr>
+  `;
+}
+
+function renderDepartmentSelect(row) {
+  const rules = loadRules();
+  const currentDepartment = String(row.department || row.rule?.label || "OTHER").trim().toUpperCase();
+  const departments = Array.from(
+    new Set([...rules.map((rule) => rule.department), String(currentDepartment || "").trim().toUpperCase()].filter(Boolean)),
+  );
+  const options = departments
+    .map((rule) => {
+      const selected = rule === currentDepartment ? "selected" : "";
+      return `<option value="${escapeHtml(rule)}" ${selected}>${escapeHtml(rule)}</option>`;
+    })
+    .join("");
+
+  return `<select class="department-select" data-row-key="${escapeHtml(row.rowKey)}">${options}</select>`;
+}
+
+function renderLateCell(row) {
+  if (!row.scanIn) return `<span class="status warn">ไม่มี scan in</span>`;
+  if (!row.lateMinutes) return `${row.scanIn}<br><span class="status ok">ไม่สาย</span>`;
+  const deductibleText = row.lateDeductibleMinutes
+    ? `<small>หักจริง ${formatDuration(row.lateDeductibleMinutes)} = ${formatMoney(row.lateDeduction)}</small>`
+    : `<small>ยังอยู่ในโควตาฟรี ${formatDuration(row.monthlyFreeMinutes || 0)}/เดือน</small>`;
+
+  return `
+    ${row.scanIn}<br>
+    <span class="status warn">สาย ${formatDuration(row.lateMinutes)}</span><br>
+    <small>เดือนนี้รวม ${formatDuration(row.monthlyLateMinutes || row.lateMinutes)}</small><br>
+    ${deductibleText}
+  `;
+}
+
+function renderEarlyLeaveCell(row) {
+  if (!row.scanOut) return `<span class="status warn">ไม่มี scan out</span>`;
+  if (!row.earlyLeaveMinutes) return `${row.scanOut}<br><span class="status ok">ไม่ออกก่อน</span>`;
+
+  return `
+    ${row.scanOut}<br>
+    <span class="status warn">ออกก่อน ${formatDuration(row.earlyLeaveMinutes)}</span>
+  `;
+}
+
+function updateSummary(calculated) {
+  const total = calculated.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  document.querySelector("#totalPeople").textContent = `${calculated.length} คน`;
+  document.querySelector("#totalAmount").textContent = formatMoney(total);
+}
+
+function formatMoney(value) {
+  return `${Math.round(value).toLocaleString("th-TH")} บาท`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function setRows(nextRows) {
+  rows.length = 0;
+  rows.push(
+    ...nextRows.map((row, index) => ({
+      ...row,
+      rowKey: row.rowKey || `${row.workDate || "nodate"}-${row.name || "noname"}-${index}`,
+    })),
+  );
+  render();
+}
+
+function getCaseSettingFromForm() {
+  const saved = loadCaseSettingForDate();
+  return {
+    date: getActiveWorkDate(),
+    task: (document.querySelector("#lastCaseTask")?.value || saved.task || "").trim(),
+    hour: (document.querySelector("#lastCaseHour")?.value || saved.hour || "22").trim().padStart(2, "0"),
+    minute: (document.querySelector("#lastCaseMinute")?.value || saved.minute || "30").trim().padStart(2, "0"),
+    note: (document.querySelector("#lastCaseNote")?.value || saved.note || "").trim(),
+  };
+}
+
+function applyCaseSetting(setting, selectedDate = getActiveWorkDate()) {
+  if (document.querySelector("#caseDate")) {
+    document.querySelector("#caseDate").value = formatDisplayDate(setting.date || selectedDate);
+  }
+  if (document.querySelector("#caseDateNative")) {
+    document.querySelector("#caseDateNative").value = normalizeDate(setting.date || selectedDate);
+  }
+
+  if (!document.querySelector("#lastCaseTask")) {
+    renderCaseSummary();
+    return;
+  }
+
+  document.querySelector("#lastCaseTask").value = setting.task || "";
+  document.querySelector("#lastCaseHour").value = setting.hour || "22";
+  document.querySelector("#lastCaseMinute").value = setting.minute || "30";
+  document.querySelector("#lastCaseNote").value = setting.note || "";
+  renderCaseSummary();
+}
+
+function renderCaseSummary() {
+  const setting = getCaseSettingFromForm();
+  const time = getGlobalLastCaseTime() || "--:--";
+  const caseSummaryTime = document.querySelector("#caseSummaryTime");
+  const lastCaseDisplay = document.querySelector("#lastCaseDisplay");
+  const caseSummaryText = document.querySelector("#caseSummaryText");
+
+  if (caseSummaryTime) caseSummaryTime.textContent = time;
+  if (lastCaseDisplay) lastCaseDisplay.value = `${setting.task || "เคสสุดท้าย"} ${time}`;
+  if (caseSummaryText) caseSummaryText.textContent = `${formatDisplayDate(setting.date || getActiveWorkDate())} · ${setting.note || setting.task || "ใช้เป็นเวลาเคสสุดท้ายของทุกคนในวันนั้น"}`;
+}
+
+async function saveCaseFromForm() {
+  const setting = getCaseSettingFromForm();
+  if (!setting.date || !normalizeTime(`${setting.hour}:${setting.minute}`)) {
+    alert("กรุณาเลือกวันที่และกรอกเวลาเคสสุดท้ายให้ถูกต้อง");
+    return;
+  }
+
+  await saveCaseSettingForDate(setting.date || getActiveWorkDate(), setting);
+  renderCaseSummary();
+
+  const message = document.querySelector("#caseSaveMessage");
+  if (message) {
+    message.textContent = `บันทึกเคสวันที่ ${formatDisplayDate(setting.date)} เวลา ${setting.hour}:${setting.minute} แล้ว`;
+  }
+}
+
+function renderRules() {
+  const rules = loadRules();
+  const rulesCount = document.querySelector("#rulesCount");
+  const rulesBody = document.querySelector("#rulesBody");
+  if (rulesCount) rulesCount.textContent = `${rules.length} แผนก`;
+  if (!rulesBody) return;
+
+  rulesBody.innerHTML = rules
+    .map(
+      (rule) => `
+        <tr>
+          <td><strong>${escapeHtml(rule.department)}</strong></td>
+          <td>${formatMoney(Number(rule.flatRate || 0))}</td>
+          <td>${rule.useNightRate ? `23:00-08:00 = ${formatMoney(Number(rule.nightRate || 0))}` : "-"}</td>
+          <td>${Number(rule.bufferHours || 1)} ชม.</td>
+          <td>
+            <div class="table-actions">
+              <button class="mini-action" type="button" data-edit-rule="${escapeHtml(rule.department)}">แก้ไข</button>
+              <button class="mini-action danger-action" type="button" data-delete-rule="${escapeHtml(rule.department)}">ลบ</button>
+            </div>
+          </td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  for (const button of document.querySelectorAll("[data-edit-rule]")) {
+    button.addEventListener("click", () => fillRuleForm(button.dataset.editRule));
+  }
+  for (const button of document.querySelectorAll("[data-delete-rule]")) {
+    button.addEventListener("click", () => deleteRule(button.dataset.deleteRule));
+  }
+}
+
+function fillRuleForm(department) {
+  if (!document.querySelector("#ruleDepartment")) return;
+  const rule = loadRules().find((item) => item.department === department);
+  if (!rule) return;
+
+  document.querySelector("#ruleDepartment").value = rule.department;
+  document.querySelector("#ruleFlatRate").value = rule.flatRate;
+  document.querySelector("#ruleBufferHours").value = rule.bufferHours;
+  document.querySelector("#ruleUseNightRate").checked = Boolean(rule.useNightRate);
+  document.querySelector("#ruleNightRate").value = rule.nightRate || "";
+  const message = document.querySelector("#ruleSaveMessage");
+  if (message) message.textContent = `กำลังแก้ไขแผนก ${rule.department}`;
+}
+
+function clearRuleForm() {
+  if (!document.querySelector("#ruleDepartment")) return;
+  document.querySelector("#ruleDepartment").value = "";
+  document.querySelector("#ruleFlatRate").value = "";
+  document.querySelector("#ruleBufferHours").value = "";
+  document.querySelector("#ruleUseNightRate").checked = false;
+  document.querySelector("#ruleNightRate").value = "";
+  const message = document.querySelector("#ruleSaveMessage");
+  if (message) message.textContent = "กรอกข้อมูลเพื่อเพิ่มแผนกใหม่";
+}
+
+async function deleteRule(department) {
+  const rules = loadRules();
+  if (rules.length <= 1) {
+    alert("ต้องเหลือกฎแผนกอย่างน้อย 1 รายการ");
+    return;
+  }
+
+  const nextRules = rules.filter((rule) => rule.department !== department);
+  await saveRules(nextRules);
+  renderRules();
+  if (document.querySelector("#resultBody")) render();
+
+  const message = document.querySelector("#ruleSaveMessage");
+  if (message) message.textContent = `ลบแผนก ${department} แล้ว`;
+}
+
+async function saveRuleFromForm() {
+  if (!document.querySelector("#ruleDepartment")) return;
+  const department = document.querySelector("#ruleDepartment").value.trim().toUpperCase();
+  const flatRate = Number(document.querySelector("#ruleFlatRate").value);
+  const bufferHours = Number(document.querySelector("#ruleBufferHours").value || 1);
+  const useNightRate = document.querySelector("#ruleUseNightRate").checked;
+  const nightRate = Number(document.querySelector("#ruleNightRate").value || 0);
+
+  if (!department || !flatRate) {
+    alert("กรุณากรอกรหัสแผนกและค่า OT/ชม.");
+    return;
+  }
+
+  const rules = loadRules();
+  const nextRule = {
+    department,
+    flatRate,
+    bufferHours,
+    useNightRate,
+    nightRate: useNightRate ? nightRate : 0,
+  };
+  const index = rules.findIndex((rule) => rule.department === department);
+  if (index >= 0) {
+    rules[index] = nextRule;
+  } else {
+    rules.push(nextRule);
+  }
+
+  await saveRules(rules);
+  renderRules();
+  if (document.querySelector("#resultBody")) render();
+  clearRuleForm();
+  const message = document.querySelector("#ruleSaveMessage");
+  if (message) message.textContent = `${index >= 0 ? "แก้ไข" : "เพิ่ม"}แผนก ${department} แล้ว`;
+}
+
+function applyLateRule() {
+  const rule = loadLateRule();
+  const rateInput = document.querySelector("#lateRatePerMinute");
+  const freeInput = document.querySelector("#lateMonthlyFreeMinutes");
+  if (rateInput) rateInput.value = rule.ratePerMinute ?? 2;
+  if (freeInput) freeInput.value = rule.monthlyFreeMinutes ?? 15;
+}
+
+async function saveLateRuleFromForm() {
+  const ratePerMinute = Number(document.querySelector("#lateRatePerMinute")?.value || 0);
+  const monthlyFreeMinutes = Number(document.querySelector("#lateMonthlyFreeMinutes")?.value || 0);
+
+  await saveLateRule({ ratePerMinute, monthlyFreeMinutes });
+  const message = document.querySelector("#lateRuleMessage");
+  if (message) message.textContent = `บันทึกกฎมาสายแล้ว: ฟรี ${monthlyFreeMinutes} นาที/เดือน, หักนาทีละ ${ratePerMinute} บาท`;
+  if (document.querySelector("#resultBody")) render();
+}
+
+async function renderHistoryPage() {
+  await fetchLiffHistoryFromFirestore();
+  renderLiffHistory();
+  renderCaseHistory();
+}
+
+function renderLiffHistory() {
+  const body = document.querySelector("#liffHistoryBody");
+  if (!body) return;
+
+  const history = loadLiffHistory();
+  if (!history.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-state">ยังไม่มีประวัติจาก LIFF</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = history
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(formatDisplayDate(item.workDate))}</td>
+          <td><strong>${escapeHtml(item.fullName || item.nickname || "-")}</strong></td>
+          <td>${escapeHtml(item.department || "-")}</td>
+          <td>${escapeHtml(item.workStatusLabel || item.workStatus || "-")}</td>
+          <td>${item.plannedStartTime ? `${item.plannedStartTime} / ${item.plannedEndTime}` : "-"}</td>
+          <td>${item.workStatus === "work" ? item.employeeOtIntent ? "มี OT" : "ไม่มี OT / ยังไม่ตอบ" : "-"}</td>
+          <td>${formatDateTime(item.otAnsweredAt || item.submittedAt)}</td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+function renderCaseHistory() {
+  const body = document.querySelector("#caseHistoryBody");
+  if (!body) return;
+
+  const saved = loadCaseSetting();
+  const byDate = saved.byDate || {};
+  const items = Object.entries(byDate)
+    .map(([date, setting]) => ({ date, ...setting }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="4" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(formatDisplayDate(item.date))}</td>
+          <td><strong>${escapeHtml(item.task || "-")}</strong></td>
+          <td>${escapeHtml(`${item.hour || "--"}:${item.minute || "--"}`)}</td>
+          <td>${escapeHtml(item.note || "-")}</td>
+        </tr>
+      `,
+    )
+    .join("");
+}
+
+async function handleFile(file) {
+  const message = document.querySelector("#importMessage");
+  if (!file) return;
+  const fileName = String(file.name || "");
+  const lowerFileName = fileName.toLowerCase();
+
+  if (lowerFileName.endsWith(".lnk")) {
+    message.textContent = "ไฟล์ .lnk เป็น Shortcut จาก Recent กรุณาเลือกไฟล์ Excel ตัวจริงที่ลงท้าย .xlsx หรือ .xls";
+    return;
+  }
+
+  if (!/\.(xlsx|xls|csv)$/i.test(fileName)) {
+    message.textContent = "รองรับเฉพาะไฟล์ .xlsx, .xls หรือ .csv";
+    return;
+  }
+
+  if (!window.XLSX) {
+    message.textContent = "ยังโหลดตัวอ่าน Excel ไม่สำเร็จ กรุณาต่ออินเทอร์เน็ตหรือใช้ปุ่มโหลดตัวอย่างก่อน";
+    return;
+  }
+
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+  const isMonthlyScanFile = String(matrix?.[1]?.[0] || "").trim() === "ชื่อบุคคล";
+  const parsedRows = isMonthlyScanFile
+    ? parseMonthlyScanRows(matrix, file.name)
+    : XLSX.utils.sheet_to_json(sheet, { defval: "" }).map(normalizeRecord);
+  setRows(parsedRows);
+  message.textContent = `นำเข้า ${parsedRows.length} รายการจาก ${file.name}`;
+}
+
+async function fetchSettingsFromFirestore() {
+  if (!db) {
+    try {
+      rulesCache = JSON.parse(localStorage.getItem(RULES_KEY)) || defaultRules;
+    } catch {
+      rulesCache = defaultRules;
+    }
+    try {
+      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15, ...(JSON.parse(localStorage.getItem(LATE_RULE_KEY)) || {}) };
+    } catch {
+      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(CASE_SETTING_KEY)) || {};
+      lastCasesCache = saved.byDate || {};
+    } catch {
+      lastCasesCache = {};
+    }
+    return;
+  }
+
+  try {
+    const rulesDoc = await db.collection("settings").doc("rules").get();
+    rulesCache = rulesDoc.exists ? (rulesDoc.data().rules || defaultRules) : defaultRules;
+
+    const lateRuleDoc = await db.collection("settings").doc("late_rule").get();
+    lateRuleCache = lateRuleDoc.exists ? lateRuleDoc.data() : { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+
+    const lastCasesSnapshot = await db.collection("last_cases").get();
+    lastCasesCache = {};
+    lastCasesSnapshot.forEach(doc => {
+      lastCasesCache[doc.id] = doc.data();
+    });
+  } catch (err) {
+    console.error("Failed to fetch settings from Firestore:", err);
+    // fallback
+    try {
+      rulesCache = JSON.parse(localStorage.getItem(RULES_KEY)) || defaultRules;
+    } catch {
+      rulesCache = defaultRules;
+    }
+    try {
+      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15, ...(JSON.parse(localStorage.getItem(LATE_RULE_KEY)) || {}) };
+    } catch {
+      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(CASE_SETTING_KEY)) || {};
+      lastCasesCache = saved.byDate || {};
+    } catch {
+      lastCasesCache = {};
+    }
+  }
+}
+
+async function fetchLiffHistoryFromFirestore() {
+  if (db) {
+    try {
+      const snapshot = await db.collection("attendance_history")
+        .orderBy("submittedAt", "desc")
+        .limit(100)
+        .get();
+      liffHistoryCache = [];
+      snapshot.forEach(doc => {
+        liffHistoryCache.push(doc.data());
+      });
+      return;
+    } catch (err) {
+      console.error("Failed to fetch LIFF history from Firestore:", err);
+    }
+  }
+  // Fallback
+  try {
+    liffHistoryCache = JSON.parse(localStorage.getItem(LIFF_HISTORY_KEY)) || [];
+  } catch {
+    liffHistoryCache = [];
+  }
+}
+
+async function init() {
+  await fetchSettingsFromFirestore();
+
+  if (document.querySelector("#caseDate")) {
+    document.querySelector("#caseDate").value = formatDisplayDate(todayInputValue());
+  }
+  if (document.querySelector("#caseDateNative")) {
+    document.querySelector("#caseDateNative").value = todayInputValue();
+  }
+  applyCaseSetting(loadCaseSettingForDate(), getActiveWorkDate());
+  renderRules();
+  applyLateRule();
+  await renderHistoryPage();
+
+  document.querySelector("#loadSampleButton")?.addEventListener("click", () => {
+    setRows(sampleRows);
+    document.querySelector("#importMessage").textContent = "โหลดข้อมูลตัวอย่างแล้ว";
+  });
+
+  document.querySelector("#calculateButton")?.addEventListener("click", render);
+  document.querySelector("#newRuleButton")?.addEventListener("click", clearRuleForm);
+  document.querySelector("#saveRuleButton")?.addEventListener("click", saveRuleFromForm);
+  document.querySelector("#saveLateRuleButton")?.addEventListener("click", saveLateRuleFromForm);
+  document.querySelector("#saveCaseButton")?.addEventListener("click", saveCaseFromForm);
+  document.querySelector("#resetRulesButton")?.addEventListener("click", async () => {
+    await saveRules(defaultRules);
+    renderRules();
+    if (document.querySelector("#resultBody")) render();
+  });
+  document.querySelector("#clearLiffHistoryButton")?.addEventListener("click", async () => {
+    localStorage.removeItem(LIFF_HISTORY_KEY);
+    liffHistoryCache = [];
+    if (db) {
+      try {
+        const snapshot = await db.collection("attendance_history").get();
+        const batch = db.batch();
+        snapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        console.log("Firestore history cleared.");
+      } catch (err) {
+        console.error("Failed to clear Firestore history:", err);
+      }
+    }
+    renderLiffHistory();
+  });
+  document.querySelector("#clearCaseHistoryButton")?.addEventListener("click", async () => {
+    localStorage.removeItem(CASE_SETTING_KEY);
+    lastCasesCache = {};
+    if (db) {
+      try {
+        const snapshot = await db.collection("last_cases").get();
+        const batch = db.batch();
+        snapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        console.log("Firestore case history cleared.");
+      } catch (err) {
+        console.error("Failed to clear Firestore case history:", err);
+      }
+    }
+    renderCaseHistory();
+  });
+  document.querySelector("#fileInput")?.addEventListener("change", (event) => {
+    handleFile(event.target.files[0]);
+  });
+
+  for (const id of ["lastCaseHour", "lastCaseMinute"]) {
+    document.querySelector(`#${id}`)?.addEventListener("input", (event) => {
+      event.target.value = event.target.value.replace(/\D/g, "").slice(0, 2);
+      renderCaseSummary();
+    });
+  }
+
+  for (const id of ["ruleFlatRate", "ruleNightRate"]) {
+    document.querySelector(`#${id}`)?.addEventListener("input", (event) => {
+      event.target.value = event.target.value.replace(/\D/g, "").slice(0, 5);
+    });
+  }
+
+  document.querySelector("#ruleBufferHours")?.addEventListener("input", (event) => {
+    event.target.value = event.target.value.replace(/\D/g, "").slice(0, 2);
+  });
+
+  for (const id of ["lateRatePerMinute", "lateMonthlyFreeMinutes"]) {
+    document.querySelector(`#${id}`)?.addEventListener("input", (event) => {
+      event.target.value = event.target.value.replace(/\D/g, "").slice(0, 5);
+    });
+  }
+
+  for (const id of ["lastCaseTask", "lastCaseNote"]) {
+    document.querySelector(`#${id}`)?.addEventListener("input", renderCaseSummary);
+  }
+
+  document.querySelector("#caseDate")?.addEventListener("click", openCaseDatePicker);
+  document.querySelector("#openCaseDatePicker")?.addEventListener("click", openCaseDatePicker);
+
+  document.querySelector("#caseDateNative")?.addEventListener("change", (event) => {
+    const selectedDate = normalizeDate(event.target.value);
+    document.querySelector("#caseDate").value = formatDisplayDate(selectedDate);
+    applyCaseSetting(loadCaseSettingForDate(selectedDate), selectedDate);
+  });
+}
+
+init();
