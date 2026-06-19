@@ -3,6 +3,7 @@ const RULES_KEY = "nsc-ot-department-rules";
 const CASE_SETTING_KEY = "nsc-ot-last-case-setting";
 const LIFF_HISTORY_KEY = "nsc-liff-attendance-history";
 const LATE_RULE_KEY = "nsc-late-rule";
+const USER_OVERRIDES_KEY = "nsc-user-department-overrides";
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -21,6 +22,8 @@ let rulesCache = null;
 let lateRuleCache = null;
 let lastCasesCache = {};
 let liffHistoryCache = [];
+let userOverridesCache = {};
+let profilesCache = [];
 
 // Initialize Firebase
 try {
@@ -84,6 +87,210 @@ const defaultRules = [
     nightRate: 0,
   },
 ];
+
+// ── Profiles from Firebase ──
+async function fetchProfilesFromFirestore() {
+  if (db) {
+    try {
+      const snapshot = await db.collection("profiles").get();
+      profilesCache = [];
+      snapshot.forEach(function (doc) {
+        var data = doc.data();
+        if (data.status === "registered" || data.fullName || data.firstName) {
+          profilesCache.push({
+            id: data.employeeId || doc.id,
+            fullName: data.fullName || data.staffDirectoryFullName || (data.firstName + " " + data.lastName),
+            nickname: data.nickname || "",
+            department: data.department || "",
+            position: data.position || data.department || "",
+            lineUserId: data.lineUserId || "",
+            lineDisplayName: data.lineDisplayName || "",
+          });
+        }
+      });
+      console.log("Profiles loaded from Firestore:", profilesCache.length);
+      return;
+    } catch (err) {
+      console.error("Failed to fetch profiles from Firestore:", err);
+    }
+  }
+  profilesCache = [];
+}
+
+function getUserKey(text) {
+  return String(text || "").replace(/\s+/g, "").toLowerCase();
+}
+
+function loadUserOverrides() {
+  return userOverridesCache;
+}
+
+async function saveUserOverrides(overrides) {
+  userOverridesCache = overrides;
+  if (db) {
+    try {
+      await db.collection("settings").doc("user_overrides").set({ overrides: overrides });
+    } catch (err) {
+      console.error("saveUserOverrides Firestore failed:", err);
+    }
+  }
+}
+
+function getEffectiveDepartment(row) {
+  var key = getUserKey(row.name);
+  
+  // 1. Check profilesCache first (Firebase source of truth)
+  var profile = profilesCache.find(function (p) {
+    return getUserKey(p.fullName) === key;
+  });
+  if (profile && (profile.department || profile.position)) {
+    return profile.department || profile.position;
+  }
+
+  // 2. Check user overrides
+  if (userOverridesCache && userOverridesCache[key]) return userOverridesCache[key];
+
+  // 3. Check LIFF log
+  var ll = row.liffLog || findLiffLog(row);
+  if (ll && ll.department) return ll.department;
+
+  // 4. Fallback to row department from Excel
+  return row.department || "";
+}
+
+function getUserLiffStatus(fullName) {
+  // LIFF Status = ตรวจจาก profiles ว่ามี lineUserId หรือไม่ (ลงทะเบียนผ่าน LINE แล้ว)
+  var profile = profilesCache.find(function (p) {
+    return getUserKey(p.fullName) === getUserKey(fullName);
+  });
+  return profile && profile.lineUserId ? true : false;
+}
+
+function renderUsersPage() {
+  var body = document.querySelector("#usersBody");
+  if (!body) return;
+
+  var overrides = loadUserOverrides();
+  var deptOptions = ["OR", "SENIOR MKT", "MKT", "OPERATION", "MAID", "MANAGER", "CS", "SALE", "ADMIN", "HR"];
+
+  if (!profilesCache.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">ยังไม่มีข้อมูลพนักงาน — รอการเชื่อมต่อ Firebase</td></tr>';
+    document.querySelector("#totalUsersCount").textContent = "0 คน";
+    document.querySelector("#liffLinkedCount").textContent = "0 LIFF";
+    return;
+  }
+
+  var users = profilesCache.map(function (profile) {
+    var key = getUserKey(profile.fullName);
+    var effectiveDept = profile.department || profile.position || (overrides && overrides[key]) || "";
+    return {
+      fullName: profile.fullName,
+      nickname: profile.nickname,
+      position: effectiveDept,
+      currentDepartment: effectiveDept,
+      hasLiff: getUserLiffStatus(profile.fullName),
+    };
+  });
+
+  document.querySelector("#totalUsersCount").textContent = users.length + " คน";
+  document.querySelector("#liffLinkedCount").textContent = users.filter(function (u) { return u.hasLiff; }).length + " LIFF";
+
+  body.innerHTML = users.map(function (user, i) {
+    return '<tr class="user-row" data-user-index="' + i + '">' +
+      "<td>" + (i + 1) + "</td>" +
+      "<td><strong>" + escapeHtml(user.fullName) + "</strong></td>" +
+      "<td>" + escapeHtml(user.nickname) + "</td>" +
+      "<td>" + escapeHtml(user.position) + "</td>" +
+      "<td>" + escapeHtml(user.position) + "</td>" +
+      "<td>" + (user.hasLiff ? '<span class="status ok">✓ LIFF Linked</span>' : '<span class="status warn">ยังไม่มี LIFF</span>') + "</td>" +
+      "</tr>";
+  }).join("");
+
+  // Bind click to open modal
+  var rows = document.querySelectorAll(".user-row");
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].addEventListener("click", function () {
+      var idx = Number(this.dataset.userIndex);
+      if (idx >= 0 && idx < profilesCache.length) {
+        openUserModal(profilesCache[idx], deptOptions);
+      }
+    });
+  }
+}
+
+// ── Modal logic ──
+function openUserModal(profile, deptOptions) {
+  var modal = document.querySelector("#userModal");
+  if (!modal) return;
+
+  var overrides = loadUserOverrides();
+  var key = getUserKey(profile.fullName);
+  var effectiveDept = profile.department || profile.position || (overrides && overrides[key]) || "";
+
+  document.querySelector("#modalUserName").textContent = profile.nickname || profile.fullName;
+  document.querySelector("#modalFullName").textContent = profile.fullName;
+  document.querySelector("#modalNickname").textContent = profile.nickname || "-";
+  document.querySelector("#modalEmployeeId").textContent = profile.id || "-";
+  document.querySelector("#modalLineUserId").textContent = profile.lineUserId || "-";
+
+  var deptSelect = document.querySelector("#modalDepartment");
+  deptSelect.innerHTML = deptOptions.map(function (d) {
+    return '<option value="' + d + '"' + (d === effectiveDept ? " selected" : "") + ">" + d + "</option>";
+  }).join("");
+
+  document.querySelector("#modalMessage").textContent = "";
+  modal.style.display = "flex";
+
+  function saveHandler() { saveUserModal(profile); }
+  function closeHandler() { modal.style.display = "none"; document.querySelector("#saveModalButton").removeEventListener("click", saveHandler); document.querySelector("#cancelModalButton").removeEventListener("click", closeHandler); document.querySelector("#closeModalButton").removeEventListener("click", closeHandler); }
+
+  document.querySelector("#saveModalButton").addEventListener("click", saveHandler);
+  document.querySelector("#cancelModalButton").addEventListener("click", closeHandler);
+  document.querySelector("#closeModalButton").addEventListener("click", closeHandler);
+
+  // Click outside to close
+  modal.addEventListener("click", function clickOutside(e) {
+    if (e.target === modal) { closeHandler(); modal.removeEventListener("click", clickOutside); }
+  });
+}
+
+async function saveUserModal(profile) {
+  var dept = document.querySelector("#modalDepartment").value;
+  var msg = document.querySelector("#modalMessage");
+
+  // Update Firestore
+  if (db && profile.lineUserId) {
+    try {
+      await db.collection("profiles").doc(profile.lineUserId).update({
+        department: dept,
+        position: dept,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Failed to update profile in Firestore:", err);
+      if (msg) msg.textContent = "เกิดข้อผิดพลาดในการบันทึก: " + err.message;
+      return;
+    }
+  }
+
+  // Save override to Firestore
+  var overrides = loadUserOverrides();
+  overrides[getUserKey(profile.fullName)] = dept;
+  await saveUserOverrides(overrides);
+
+  // Update cache
+  profile.department = dept;
+  profile.position = dept;
+
+  if (msg) msg.textContent = "บันทึกแผนก " + dept + " สำหรับ " + profile.fullName + " เรียบร้อย";
+  renderUsersPage();
+
+  // Auto close after 1.2s
+  setTimeout(function () {
+    var modal = document.querySelector("#userModal");
+    if (modal) modal.style.display = "none";
+  }, 1200);
+}
 
 const sampleRows = [
   {
@@ -450,7 +657,7 @@ function calculateSplitRateAmount(otStart, otEnd, rule) {
 function calculateRow(row) {
   const liffLog = findLiffLog(row);
   const startTime = row.startTime || liffLog?.plannedStartTime || "";
-  const department = row.department || liffLog?.department || "";
+  const department = getEffectiveDepartment(row) || liffLog?.department || "";
   const workDate = row.workDate || liffLog?.workDate || "";
   const rule = getDepartmentRule(department);
   if (!startTime) {
@@ -1056,25 +1263,12 @@ async function handleFile(file) {
 
 async function fetchSettingsFromFirestore() {
   if (!db) {
-    try {
-      rulesCache = JSON.parse(localStorage.getItem(RULES_KEY)) || defaultRules;
-    } catch {
-      rulesCache = defaultRules;
-    }
-    try {
-      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15, ...(JSON.parse(localStorage.getItem(LATE_RULE_KEY)) || {}) };
-    } catch {
-      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
-    }
-    try {
-      const saved = JSON.parse(localStorage.getItem(CASE_SETTING_KEY)) || {};
-      lastCasesCache = saved.byDate || {};
-    } catch {
-      lastCasesCache = {};
-    }
+    rulesCache = defaultRules;
+    lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+    lastCasesCache = {};
+    userOverridesCache = {};
     return;
   }
-
   try {
     const rulesDoc = await db.collection("settings").doc("rules").get();
     rulesCache = rulesDoc.exists ? (rulesDoc.data().rules || defaultRules) : defaultRules;
@@ -1087,6 +1281,9 @@ async function fetchSettingsFromFirestore() {
     lastCasesSnapshot.forEach(doc => {
       lastCasesCache[doc.id] = doc.data();
     });
+
+    const userOverridesDoc = await db.collection("settings").doc("user_overrides").get();
+    userOverridesCache = userOverridesDoc.exists ? (userOverridesDoc.data().overrides || {}) : {};
   } catch (err) {
     console.error("Failed to fetch settings from Firestore:", err);
     // fallback
@@ -1106,6 +1303,7 @@ async function fetchSettingsFromFirestore() {
     } catch {
       lastCasesCache = {};
     }
+    userOverridesCache = {};
   }
 }
 
@@ -1135,6 +1333,7 @@ async function fetchLiffHistoryFromFirestore() {
 
 async function init() {
   await fetchSettingsFromFirestore();
+  await fetchProfilesFromFirestore();
 
   if (document.querySelector("#caseDate")) {
     document.querySelector("#caseDate").value = formatDisplayDate(todayInputValue());
@@ -1146,6 +1345,7 @@ async function init() {
   renderRules();
   applyLateRule();
   await renderHistoryPage();
+  renderUsersPage();
 
   document.querySelector("#loadSampleButton")?.addEventListener("click", () => {
     setRows(sampleRows);
