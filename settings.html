@@ -145,6 +145,24 @@
           <p id="lateRuleMessage" class="import-message"></p>
         </div>
       </section>
+
+      <section class="panel settings-panel">
+        <div class="panel-head">
+          <div>
+            <p>OT threshold rule</p>
+            <h2>ตั้งค่าเกณฑ์ขั้นต่ำโอที</h2>
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <label>
+            เริ่มคิดโอทีเมื่อทำครบกี่นาทีขึ้นไป (เช่น 15 นาที)
+            <input id="otMinThreshold" inputmode="numeric" placeholder="15" />
+          </label>
+          <button id="saveOtRuleButton" type="button" class="primary-button">บันทึกเกณฑ์โอที</button>
+          <p id="otRuleMessage" class="import-message"></p>
+        </div>
+      </section>
     </main>
 
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
