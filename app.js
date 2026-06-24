@@ -4,6 +4,7 @@ const CASE_SETTING_KEY = "nsc-ot-last-case-setting";
 const LIFF_HISTORY_KEY = "nsc-liff-attendance-history";
 const LATE_RULE_KEY = "nsc-late-rule";
 const USER_OVERRIDES_KEY = "nsc-user-department-overrides";
+const OT_RULE_KEY = "nsc-ot-rule";
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -20,6 +21,7 @@ const firebaseConfig = {
 let db = null;
 let rulesCache = null;
 let lateRuleCache = null;
+let otRuleCache = null;
 let lastCasesCache = {};
 let liffHistoryCache = [];
 let userOverridesCache = {};
@@ -367,7 +369,6 @@ function loadRules() {
 
 async function saveRules(rules) {
   rulesCache = rules;
-  localStorage.setItem(RULES_KEY, JSON.stringify(rules));
   if (db) {
     try {
       await db.collection("settings").doc("rules").set({ rules });
@@ -388,7 +389,6 @@ function loadCaseSettingForDate(dateValue = getActiveWorkDate()) {
 
 async function saveCaseSettingForDate(dateValue, setting) {
   lastCasesCache[dateValue] = { ...setting, date: dateValue };
-  localStorage.setItem(CASE_SETTING_KEY, JSON.stringify({ byDate: lastCasesCache }));
   if (db) {
     try {
       await db.collection("last_cases").doc(dateValue).set({ ...setting, date: dateValue });
@@ -409,13 +409,28 @@ function loadLateRule() {
 
 async function saveLateRule(rule) {
   lateRuleCache = rule;
-  localStorage.setItem(LATE_RULE_KEY, JSON.stringify(rule));
   if (db) {
     try {
       await db.collection("settings").doc("late_rule").set(rule);
       console.log("Late rule saved to Firebase Firestore.");
     } catch (err) {
       console.error("Failed to save late rule to Firestore:", err);
+    }
+  }
+}
+
+function loadOtRule() {
+  return otRuleCache || { minThreshold: 15 };
+}
+
+async function saveOtRule(rule) {
+  otRuleCache = rule;
+  if (db) {
+    try {
+      await db.collection("settings").doc("ot_rule").set(rule);
+      console.log("OT rule saved to Firebase Firestore.");
+    } catch (err) {
+      console.error("Failed to save OT rule to Firestore:", err);
     }
   }
 }
@@ -679,7 +694,14 @@ function calculateRow(row) {
   const scheduledEnd = startMinutes + 9 * 60;
   const outMinutes = timeToMinutes(row.scanOut, startMinutes);
   const earlyLeaveMinutes = Math.max(0, scheduledEnd - outMinutes);
-  const actualOtMinutes = roundMinutes(Math.max(0, outMinutes - scheduledEnd));
+
+  // Dynamic OT threshold logic
+  const otRule = loadOtRule();
+  const minThreshold = Number(otRule.minThreshold ?? 15);
+  const rawOtMinutes = Math.max(0, outMinutes - scheduledEnd);
+  const isOtEligible = rawOtMinutes >= minThreshold;
+  const actualOtMinutes = isOtEligible ? roundMinutes(rawOtMinutes) : 0;
+
   const lastCaseTime = row.lastCaseEnd || getSavedLastCaseTime(workDate);
   const missingLastCase = !lastCaseTime;
   const lastCaseMinutes = lastCaseTime ? timeToMinutes(lastCaseTime, startMinutes) : null;
@@ -688,9 +710,9 @@ function calculateRow(row) {
   const hasOtIntent = Boolean(liffLog?.employeeOtIntent);
   const hasOtWithoutIntent = actualOtMinutes > 0 && !hasOtIntent;
   const payableOutMinutes = cutoff === null ? outMinutes : Math.min(outMinutes, cutoff);
-  let payableOtMinutes = hasOtIntent ? roundMinutes(Math.max(0, payableOutMinutes - scheduledEnd)) : 0;
   const excessAfterCaseMinutes = cutoff === null ? 0 : Math.max(0, outMinutes - cutoff);
 
+  let payableOtMinutes = 0;
   let amount = 0;
   let breakdown = "";
 
@@ -698,15 +720,17 @@ function calculateRow(row) {
     amount = 0;
     payableOtMinutes = 0;
     breakdown = "ยังไม่มีข้อมูลเคสสุดท้าย";
-  } else if (!hasOtIntent) {
+  } else if (!hasOtIntent || !isOtEligible) {
     amount = 0;
-    breakdown = "ยังไม่กดว่ามี OT";
+    payableOtMinutes = 0;
+    breakdown = !isOtEligible ? `โอทีไม่ถึง ${minThreshold} นาที` : "ยังไม่กดว่ามี OT";
   } else if (rule.useNightRate) {
     const splitResult = calculateSplitRateAmount(scheduledEnd, payableOutMinutes, rule);
     amount = splitResult.amount;
     payableOtMinutes = splitResult.paidMinutes;
     breakdown = splitResult.breakdown;
   } else {
+    payableOtMinutes = roundMinutes(Math.max(0, payableOutMinutes - scheduledEnd));
     amount = (payableOtMinutes / 60) * rule.flatRate;
     breakdown = `${rule.flatRate} บาท: ${formatDuration(payableOtMinutes)}`;
   }
@@ -1166,10 +1190,217 @@ async function saveLateRuleFromForm() {
   if (document.querySelector("#resultBody")) render();
 }
 
+function applyOtRule() {
+  const rule = loadOtRule();
+  const thresholdInput = document.querySelector("#otMinThreshold");
+  if (thresholdInput) thresholdInput.value = rule.minThreshold ?? 15;
+}
+
+async function saveOtRuleFromForm() {
+  const minThreshold = Number(document.querySelector("#otMinThreshold")?.value || 0);
+
+  await saveOtRule({ minThreshold });
+  const message = document.querySelector("#otRuleMessage");
+  if (message) message.textContent = `บันทึกเกณฑ์ขั้นต่ำโอทีแล้ว: เริ่มคิดโอทีเมื่อทำครบ ${minThreshold} นาทีขึ้นไป`;
+  if (document.querySelector("#resultBody")) render();
+}
+
 async function renderHistoryPage() {
   await fetchLiffHistoryFromFirestore();
   renderLiffHistory();
   renderCaseHistory();
+}
+
+function formatThaiMonthYear(yearMonthStr) {
+  const parts = String(yearMonthStr || "").split("-");
+  if (parts.length < 2) return yearMonthStr || "";
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const monthNames = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+  ];
+  const thaiYear = y + 543;
+  return `${monthNames[m - 1]} ${thaiYear}`;
+}
+
+function updateFilterOptions(selectElement, uniqueMonths) {
+  if (!selectElement) return;
+  const currentVal = selectElement.value;
+  const newOptionsHTML = `<option value="">กรองรายเดือน: ทั้งหมด</option>` + uniqueMonths.map(ym => {
+    return `<option value="${ym}">${formatThaiMonthYear(ym)}</option>`;
+  }).join("");
+  
+  if (selectElement.innerHTML !== newOptionsHTML) {
+    selectElement.innerHTML = newOptionsHTML;
+    if (Array.from(selectElement.options).some(opt => opt.value === currentVal)) {
+      selectElement.value = currentVal;
+    } else {
+      selectElement.value = "";
+    }
+  }
+}
+
+async function deleteLiffHistoryItem(docId) {
+  if (!confirm("ยืนยันการลบรายการประวัตินี้ใช่หรือไม่?")) return;
+
+  if (db) {
+    try {
+      await db.collection("attendance_history").doc(docId).delete();
+      console.log("LIFF history document deleted from Firestore:", docId);
+    } catch (err) {
+      console.error("Failed to delete LIFF history from Firestore:", err);
+      alert("ลบข้อมูลจาก Firebase ล้มเหลว: " + err.message);
+      return;
+    }
+  }
+
+  try {
+    if (docId.includes("_")) {
+      const [lineUserId, cycleDate] = docId.split("_");
+      liffHistoryCache = liffHistoryCache.filter(item => !(item.id === docId || (item.lineUserId === lineUserId && (item.cycleDate || item.workDate) === cycleDate)));
+    } else {
+      liffHistoryCache = liffHistoryCache.filter(item => item.id !== docId);
+    }
+  } catch (err) {
+    console.error("Failed to update cache history:", err);
+  }
+
+  renderLiffHistory();
+  if (document.querySelector("#resultBody")) render();
+  alert("ลบข้อมูลสำเร็จ");
+}
+
+async function deleteCaseHistoryItem(dateValue) {
+  if (!confirm(`ยืนยันการลบประวัติเคสวันที่ ${formatDisplayDate(dateValue)} ใช่หรือไม่?`)) return;
+
+  if (db) {
+    try {
+      await db.collection("last_cases").doc(dateValue).delete();
+      console.log("Last case document deleted from Firestore:", dateValue);
+    } catch (err) {
+      console.error("Failed to delete last case from Firestore:", err);
+      alert("ลบข้อมูลจาก Firebase ล้มเหลว: " + err.message);
+      return;
+    }
+  }
+
+  try {
+    delete lastCasesCache[dateValue];
+  } catch (err) {
+    console.error("Failed to update cache case history:", err);
+  }
+
+  renderCaseHistory();
+  if (document.querySelector("#resultBody")) render();
+  alert("ลบข้อมูลสำเร็จ");
+}
+
+function updateLiffBulkDeleteButton() {
+  const btn = document.querySelector("#deleteSelectedLiffButton");
+  if (!btn) return;
+  const checkedBoxes = document.querySelectorAll("#liffHistoryBody .liff-row-checkbox:checked");
+  const count = checkedBoxes.length;
+  if (count > 0) {
+    btn.textContent = `ลบที่เลือก (${count})`;
+    btn.style.display = "inline-block";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+async function deleteSelectedLiffItems() {
+  const checkedBoxes = document.querySelectorAll("#liffHistoryBody .liff-row-checkbox:checked");
+  if (checkedBoxes.length === 0) return;
+
+  const docIds = Array.from(checkedBoxes).map(cb => cb.dataset.id);
+  if (!confirm(`ยืนยันการลบประวัติ LIFF ที่เลือกทั้งหมด ${docIds.length} รายการใช่หรือไม่?`)) return;
+
+  if (db) {
+    try {
+      const batch = db.batch();
+      docIds.forEach(docId => {
+        const ref = db.collection("attendance_history").doc(docId);
+        batch.delete(ref);
+      });
+      await batch.commit();
+      console.log(`Successfully deleted ${docIds.length} documents from Firestore.`);
+    } catch (err) {
+      console.error("Firestore batch delete failed:", err);
+      alert("ลบข้อมูลจาก Firebase ล้มเหลว: " + err.message);
+      return;
+    }
+  }
+
+  try {
+    const filterPairs = docIds.map(docId => {
+      const [lineUserId, cycleDate] = docId.includes("_") ? docId.split("_") : [null, null];
+      return { id: docId, lineUserId, cycleDate };
+    });
+
+    liffHistoryCache = liffHistoryCache.filter(item => {
+      return !filterPairs.some(filter => {
+        if (item.id === filter.id) return true;
+        if (filter.lineUserId && item.lineUserId === filter.lineUserId && (item.cycleDate || item.workDate) === filter.cycleDate) return true;
+        return false;
+      });
+    });
+  } catch (err) {
+    console.error("Failed to update cache history:", err);
+  }
+
+  renderLiffHistory();
+  if (document.querySelector("#resultBody")) render();
+  alert("ลบข้อมูลสำเร็จ");
+}
+
+function updateCaseBulkDeleteButton() {
+  const btn = document.querySelector("#deleteSelectedCaseButton");
+  if (!btn) return;
+  const checkedBoxes = document.querySelectorAll("#caseHistoryBody .case-row-checkbox:checked");
+  const count = checkedBoxes.length;
+  if (count > 0) {
+    btn.textContent = `ลบที่เลือก (${count})`;
+    btn.style.display = "inline-block";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+async function deleteSelectedCaseItems() {
+  const checkedBoxes = document.querySelectorAll("#caseHistoryBody .case-row-checkbox:checked");
+  if (checkedBoxes.length === 0) return;
+
+  const dateValues = Array.from(checkedBoxes).map(cb => cb.dataset.id);
+  if (!confirm(`ยืนยันการลบประวัติเคสที่เลือกทั้งหมด ${dateValues.length} รายการใช่หรือไม่?`)) return;
+
+  if (db) {
+    try {
+      const batch = db.batch();
+      dateValues.forEach(dateVal => {
+        const ref = db.collection("last_cases").doc(dateVal);
+        batch.delete(ref);
+      });
+      await batch.commit();
+      console.log(`Successfully deleted ${dateValues.length} last cases from Firestore.`);
+    } catch (err) {
+      console.error("Firestore batch delete failed:", err);
+      alert("ลบข้อมูลจาก Firebase ล้มเหลว: " + err.message);
+      return;
+    }
+  }
+
+  try {
+    dateValues.forEach(dateVal => {
+      delete lastCasesCache[dateVal];
+    });
+  } catch (err) {
+    console.error("Failed to update cache case history:", err);
+  }
+
+  renderCaseHistory();
+  if (document.querySelector("#resultBody")) render();
+  alert("ลบข้อมูลสำเร็จ");
 }
 
 function renderLiffHistory() {
@@ -1177,15 +1408,36 @@ function renderLiffHistory() {
   if (!body) return;
 
   const history = loadLiffHistory();
-  if (!history.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-state">ยังไม่มีประวัติจาก LIFF</td></tr>`;
+
+  // Populate month filter dropdown dynamically
+  const filterSelect = document.querySelector("#liffMonthFilter");
+  const uniqueMonths = Array.from(new Set(history.map(item => item.workDate ? item.workDate.slice(0, 7) : "")))
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  updateFilterOptions(filterSelect, uniqueMonths);
+
+  // Apply filtering
+  const selectedYm = filterSelect ? filterSelect.value : "";
+  const filtered = selectedYm ? history.filter(item => item.workDate && item.workDate.slice(0, 7) === selectedYm) : history;
+
+  // Reset header checkbox and hide bulk button
+  const selectAllCheckbox = document.querySelector("#selectAllLiff");
+  if (selectAllCheckbox) selectAllCheckbox.checked = false;
+  updateLiffBulkDeleteButton();
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="9" class="empty-state">${selectedYm ? "ไม่มีประวัติในเดือนที่เลือก" : "ยังไม่มีประวัติจาก LIFF"}</td></tr>`;
     return;
   }
 
-  body.innerHTML = history
+  body.innerHTML = filtered
     .map(
-      (item) => `
+      (item) => {
+        const docId = item.id || `${item.lineUserId}_${item.cycleDate || item.workDate}`;
+        return `
         <tr>
+          <td style="text-align: center; vertical-align: middle;"><input type="checkbox" class="liff-row-checkbox" data-id="${escapeHtml(docId)}" style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></td>
           <td>${escapeHtml(formatDisplayDate(item.workDate))}</td>
           <td><strong>${escapeHtml(item.fullName || item.nickname || "-")}</strong></td>
           <td>${escapeHtml(item.department || "-")}</td>
@@ -1193,10 +1445,40 @@ function renderLiffHistory() {
           <td>${item.plannedStartTime ? `${item.plannedStartTime} / ${item.plannedEndTime}` : "-"}</td>
           <td>${item.workStatus === "work" ? item.employeeOtIntent ? "มี OT" : "ไม่มี OT / ยังไม่ตอบ" : "-"}</td>
           <td>${formatDateTime(item.otAnsweredAt || item.submittedAt)}</td>
+          <td>
+            <button class="mini-action danger-action" type="button" data-delete-liff-key="${escapeHtml(docId)}">ลบ</button>
+          </td>
         </tr>
-      `,
+      `;
+      }
     )
     .join("");
+
+  for (const button of body.querySelectorAll("[data-delete-liff-key]")) {
+    button.addEventListener("click", () => {
+      deleteLiffHistoryItem(button.dataset.deleteLiffKey);
+    });
+  }
+
+  const rowCheckboxes = body.querySelectorAll(".liff-row-checkbox");
+  for (const cb of rowCheckboxes) {
+    cb.addEventListener("change", () => {
+      updateLiffBulkDeleteButton();
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = Array.from(rowCheckboxes).every(r => r.checked);
+      }
+    });
+  }
+
+  if (selectAllCheckbox) {
+    selectAllCheckbox.onchange = (e) => {
+      const checked = e.target.checked;
+      for (const cb of rowCheckboxes) {
+        cb.checked = checked;
+      }
+      updateLiffBulkDeleteButton();
+    };
+  }
 }
 
 function renderCaseHistory() {
@@ -1209,23 +1491,70 @@ function renderCaseHistory() {
     .map(([date, setting]) => ({ date, ...setting }))
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  if (!items.length) {
-    body.innerHTML = `<tr><td colspan="4" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td></tr>`;
+  // Populate month filter dropdown dynamically
+  const filterSelect = document.querySelector("#caseMonthFilter");
+  const uniqueMonths = Array.from(new Set(items.map(item => item.date ? item.date.slice(0, 7) : "")))
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  updateFilterOptions(filterSelect, uniqueMonths);
+
+  // Apply filtering
+  const selectedYm = filterSelect ? filterSelect.value : "";
+  const filtered = selectedYm ? items.filter(item => item.date && item.date.slice(0, 7) === selectedYm) : items;
+
+  // Reset header checkbox and hide bulk button
+  const selectAllCheckbox = document.querySelector("#selectAllCase");
+  if (selectAllCheckbox) selectAllCheckbox.checked = false;
+  updateCaseBulkDeleteButton();
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty-state">${selectedYm ? "ไม่มีประวัติเคสในเดือนที่เลือก" : "ยังไม่มีประวัติเคสสุดท้าย"}</td></tr>`;
     return;
   }
 
-  body.innerHTML = items
+  body.innerHTML = filtered
     .map(
       (item) => `
         <tr>
+          <td style="text-align: center; vertical-align: middle;"><input type="checkbox" class="case-row-checkbox" data-id="${escapeHtml(item.date)}" style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></td>
           <td>${escapeHtml(formatDisplayDate(item.date))}</td>
           <td><strong>${escapeHtml(item.task || "-")}</strong></td>
           <td>${escapeHtml(`${item.hour || "--"}:${item.minute || "--"}`)}</td>
           <td>${escapeHtml(item.note || "-")}</td>
+          <td>
+            <button class="mini-action danger-action" type="button" data-delete-case-key="${escapeHtml(item.date)}">ลบ</button>
+          </td>
         </tr>
       `,
     )
     .join("");
+
+  for (const button of body.querySelectorAll("[data-delete-case-key]")) {
+    button.addEventListener("click", () => {
+      deleteCaseHistoryItem(button.dataset.deleteCaseKey);
+    });
+  }
+
+  const rowCheckboxes = body.querySelectorAll(".case-row-checkbox");
+  for (const cb of rowCheckboxes) {
+    cb.addEventListener("change", () => {
+      updateCaseBulkDeleteButton();
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = Array.from(rowCheckboxes).every(r => r.checked);
+      }
+    });
+  }
+
+  if (selectAllCheckbox) {
+    selectAllCheckbox.onchange = (e) => {
+      const checked = e.target.checked;
+      for (const cb of rowCheckboxes) {
+        cb.checked = checked;
+      }
+      updateCaseBulkDeleteButton();
+    };
+  }
 }
 
 async function handleFile(file) {
@@ -1265,6 +1594,7 @@ async function fetchSettingsFromFirestore() {
   if (!db) {
     rulesCache = defaultRules;
     lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+    otRuleCache = { minThreshold: 15 };
     lastCasesCache = {};
     userOverridesCache = {};
     return;
@@ -1275,6 +1605,9 @@ async function fetchSettingsFromFirestore() {
 
     const lateRuleDoc = await db.collection("settings").doc("late_rule").get();
     lateRuleCache = lateRuleDoc.exists ? lateRuleDoc.data() : { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+
+    const otRuleDoc = await db.collection("settings").doc("ot_rule").get();
+    otRuleCache = otRuleDoc.exists ? otRuleDoc.data() : { minThreshold: 15 };
 
     const lastCasesSnapshot = await db.collection("last_cases").get();
     lastCasesCache = {};
@@ -1287,22 +1620,10 @@ async function fetchSettingsFromFirestore() {
   } catch (err) {
     console.error("Failed to fetch settings from Firestore:", err);
     // fallback
-    try {
-      rulesCache = JSON.parse(localStorage.getItem(RULES_KEY)) || defaultRules;
-    } catch {
-      rulesCache = defaultRules;
-    }
-    try {
-      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15, ...(JSON.parse(localStorage.getItem(LATE_RULE_KEY)) || {}) };
-    } catch {
-      lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
-    }
-    try {
-      const saved = JSON.parse(localStorage.getItem(CASE_SETTING_KEY)) || {};
-      lastCasesCache = saved.byDate || {};
-    } catch {
-      lastCasesCache = {};
-    }
+    rulesCache = defaultRules;
+    lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+    otRuleCache = { minThreshold: 15 };
+    lastCasesCache = {};
     userOverridesCache = {};
   }
 }
@@ -1316,24 +1637,117 @@ async function fetchLiffHistoryFromFirestore() {
         .get();
       liffHistoryCache = [];
       snapshot.forEach(doc => {
-        liffHistoryCache.push(doc.data());
+        const data = doc.data();
+        data.id = doc.id;
+        liffHistoryCache.push(data);
       });
       return;
     } catch (err) {
       console.error("Failed to fetch LIFF history from Firestore:", err);
     }
   }
-  // Fallback
-  try {
-    liffHistoryCache = JSON.parse(localStorage.getItem(LIFF_HISTORY_KEY)) || [];
-  } catch {
-    liffHistoryCache = [];
-  }
+// Fallback
+  liffHistoryCache = [];
 }
 
+let unsubscribeSettings = null;
+let unsubscribeProfiles = null;
+let unsubscribeLiffHistory = null;
+let unsubscribeLastCases = null;
+
+function listenToSettings() {
+  if (!db) return;
+  if (unsubscribeSettings) unsubscribeSettings();
+  unsubscribeSettings = db.collection("settings").onSnapshot((snapshot) => {
+    snapshot.forEach((doc) => {
+      if (doc.id === "rules") {
+        rulesCache = doc.data().rules || defaultRules;
+        renderRules();
+      } else if (doc.id === "late_rule") {
+        lateRuleCache = doc.data();
+        applyLateRule();
+      } else if (doc.id === "ot_rule") {
+        otRuleCache = doc.data() || { minThreshold: 15 };
+        applyOtRule();
+      } else if (doc.id === "user_overrides") {
+        userOverridesCache = doc.data().overrides || {};
+        renderUsersPage();
+      }
+    });
+    console.log("Settings updated in real-time.");
+    if (document.querySelector("#resultBody")) render();
+  }, (err) => console.error("Failed to subscribe to settings:", err));
+}
+
+function listenToProfiles() {
+  if (!db) return;
+  if (unsubscribeProfiles) unsubscribeProfiles();
+  unsubscribeProfiles = db.collection("profiles").onSnapshot((snapshot) => {
+    profilesCache = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.status === "registered" || data.fullName || data.firstName) {
+        profilesCache.push({
+          id: data.employeeId || doc.id,
+          fullName: data.fullName || data.staffDirectoryFullName || (data.firstName + " " + data.lastName),
+          nickname: data.nickname || "",
+          department: data.department || "",
+          position: data.position || data.department || "",
+          lineUserId: data.lineUserId || "",
+          lineDisplayName: data.lineDisplayName || "",
+        });
+      }
+    });
+    console.log("Profiles updated in real-time:", profilesCache.length);
+    renderUsersPage();
+    if (document.querySelector("#resultBody")) render();
+  }, (err) => console.error("Failed to subscribe to profiles:", err));
+}
+
+function listenToLiffHistory() {
+  if (!db) return;
+  if (unsubscribeLiffHistory) unsubscribeLiffHistory();
+  unsubscribeLiffHistory = db.collection("attendance_history")
+    .orderBy("submittedAt", "desc")
+    .limit(100)
+    .onSnapshot((snapshot) => {
+      liffHistoryCache = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        data.id = doc.id;
+        liffHistoryCache.push(data);
+      });
+      console.log("LIFF history updated in real-time:", liffHistoryCache.length);
+      renderLiffHistory();
+      if (document.querySelector("#resultBody")) render();
+    }, (err) => console.error("Failed to subscribe to LIFF history:", err));
+}
+
+function listenToLastCases() {
+  if (!db) return;
+  if (unsubscribeLastCases) unsubscribeLastCases();
+  unsubscribeLastCases = db.collection("last_cases").onSnapshot((snapshot) => {
+    lastCasesCache = {};
+    snapshot.forEach((doc) => {
+      lastCasesCache[doc.id] = doc.data();
+    });
+    console.log("Last cases updated in real-time:", Object.keys(lastCasesCache).length);
+    applyCaseSetting(loadCaseSettingForDate(), getActiveWorkDate());
+    renderCaseHistory();
+    if (document.querySelector("#resultBody")) render();
+  }, (err) => console.error("Failed to subscribe to last cases:", err));
+}
+
+
 async function init() {
-  await fetchSettingsFromFirestore();
-  await fetchProfilesFromFirestore();
+  // Initialize caches with defaults directly (instant load & fallbacks)
+  rulesCache = defaultRules;
+  lateRuleCache = { ratePerMinute: 2, monthlyFreeMinutes: 15 };
+  otRuleCache = { minThreshold: 15 };
+  lastCasesCache = {};
+  userOverridesCache = {};
+  profilesCache = [];
+  liffHistoryCache = [];
 
   if (document.querySelector("#caseDate")) {
     document.querySelector("#caseDate").value = formatDisplayDate(todayInputValue());
@@ -1342,10 +1756,22 @@ async function init() {
     document.querySelector("#caseDateNative").value = todayInputValue();
   }
   applyCaseSetting(loadCaseSettingForDate(), getActiveWorkDate());
+  
+  // Render initially with the loaded fallbacks/caches
   renderRules();
   applyLateRule();
-  await renderHistoryPage();
+  applyOtRule();
+  renderLiffHistory();
+  renderCaseHistory();
   renderUsersPage();
+
+  // If Firebase is available, register real-time snapshot listeners to override caches and re-render
+  if (db) {
+    listenToSettings();
+    listenToProfiles();
+    listenToLiffHistory();
+    listenToLastCases();
+  }
 
   document.querySelector("#loadSampleButton")?.addEventListener("click", () => {
     setRows(sampleRows);
@@ -1356,14 +1782,17 @@ async function init() {
   document.querySelector("#newRuleButton")?.addEventListener("click", clearRuleForm);
   document.querySelector("#saveRuleButton")?.addEventListener("click", saveRuleFromForm);
   document.querySelector("#saveLateRuleButton")?.addEventListener("click", saveLateRuleFromForm);
+  document.querySelector("#saveOtRuleButton")?.addEventListener("click", saveOtRuleFromForm);
   document.querySelector("#saveCaseButton")?.addEventListener("click", saveCaseFromForm);
   document.querySelector("#resetRulesButton")?.addEventListener("click", async () => {
     await saveRules(defaultRules);
     renderRules();
     if (document.querySelector("#resultBody")) render();
   });
+  document.querySelector("#deleteSelectedLiffButton")?.addEventListener("click", deleteSelectedLiffItems);
+  document.querySelector("#deleteSelectedCaseButton")?.addEventListener("click", deleteSelectedCaseItems);
+
   document.querySelector("#clearLiffHistoryButton")?.addEventListener("click", async () => {
-    localStorage.removeItem(LIFF_HISTORY_KEY);
     liffHistoryCache = [];
     if (db) {
       try {
@@ -1379,7 +1808,6 @@ async function init() {
     renderLiffHistory();
   });
   document.querySelector("#clearCaseHistoryButton")?.addEventListener("click", async () => {
-    localStorage.removeItem(CASE_SETTING_KEY);
     lastCasesCache = {};
     if (db) {
       try {
@@ -1415,7 +1843,7 @@ async function init() {
     event.target.value = event.target.value.replace(/\D/g, "").slice(0, 2);
   });
 
-  for (const id of ["lateRatePerMinute", "lateMonthlyFreeMinutes"]) {
+  for (const id of ["lateRatePerMinute", "lateMonthlyFreeMinutes", "otMinThreshold"]) {
     document.querySelector(`#${id}`)?.addEventListener("input", (event) => {
       event.target.value = event.target.value.replace(/\D/g, "").slice(0, 5);
     });
@@ -1433,6 +1861,9 @@ async function init() {
     document.querySelector("#caseDate").value = formatDisplayDate(selectedDate);
     applyCaseSetting(loadCaseSettingForDate(selectedDate), selectedDate);
   });
+
+  document.querySelector("#liffMonthFilter")?.addEventListener("change", renderLiffHistory);
+  document.querySelector("#caseMonthFilter")?.addEventListener("change", renderCaseHistory);
 }
 
 init();
