@@ -29,13 +29,20 @@
             <p>Line LIFF history</p>
             <h2>ประวัติที่พนักงานกดจาก LIFF</h2>
           </div>
-          <button id="clearLiffHistoryButton" type="button" class="soft-button">ล้างประวัติ LIFF</button>
+          <div class="head-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <select id="liffMonthFilter" style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; background: var(--paper); color: var(--ink);">
+              <option value="">กรองรายเดือน: ทั้งหมด</option>
+            </select>
+            <button id="deleteSelectedLiffButton" type="button" class="soft-button danger-action" style="display: none;">ลบที่เลือก (0)</button>
+            <button id="clearLiffHistoryButton" type="button" class="soft-button">ล้างประวัติ LIFF</button>
+          </div>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; text-align: center; vertical-align: middle;"><input type="checkbox" id="selectAllLiff" style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></th>
                 <th>วันที่</th>
                 <th>พนักงาน</th>
                 <th>แผนก</th>
@@ -43,11 +50,12 @@
                 <th>เวลาเริ่ม/เลิก</th>
                 <th>OT</th>
                 <th>ส่งเมื่อ</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody id="liffHistoryBody">
               <tr>
-                <td colspan="7" class="empty-state">ยังไม่มีประวัติจาก LIFF</td>
+                <td colspan="9" class="empty-state">ยังไม่มีประวัติจาก LIFF</td>
               </tr>
             </tbody>
           </table>
@@ -60,22 +68,30 @@
             <p>Last case history</p>
             <h2>ประวัติเคสสุดท้ายรายวัน</h2>
           </div>
-          <button id="clearCaseHistoryButton" type="button" class="soft-button">ล้างประวัติเคส</button>
+          <div class="head-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <select id="caseMonthFilter" style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; background: var(--paper); color: var(--ink);">
+              <option value="">กรองรายเดือน: ทั้งหมด</option>
+            </select>
+            <button id="deleteSelectedCaseButton" type="button" class="soft-button danger-action" style="display: none;">ลบที่เลือก (0)</button>
+            <button id="clearCaseHistoryButton" type="button" class="soft-button">ล้างประวัติเคส</button>
+          </div>
         </div>
 
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; text-align: center; vertical-align: middle;"><input type="checkbox" id="selectAllCase" style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></th>
                 <th>วันที่</th>
                 <th>ทำอะไร</th>
                 <th>เวลาเสร็จ</th>
                 <th>รายละเอียด</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody id="caseHistoryBody">
               <tr>
-                <td colspan="4" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td>
+                <td colspan="6" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td>
               </tr>
             </tbody>
           </table>
