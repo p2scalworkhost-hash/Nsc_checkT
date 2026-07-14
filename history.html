@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NSC OT History</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <img src="./assets/nsc-logo.svg" alt="NSC Specialist Surgery" />
+      <div>
+        <p>Payroll Audit Tool</p>
+        <h1>History จาก LIFF และเคสสุดท้าย</h1>
+      </div>
+    </header>
+
+    <nav class="page-nav" aria-label="OT calculator navigation">
+      <a href="./index.html">คำนวณ OT</a>
+      <a href="./settings.html">Settings</a>
+      <a href="./history.html" class="active">History</a>
+      <a href="./users.html">Users</a>
+    </nav>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <p>Line LIFF history</p>
+          <h2>ประวัติที่พนักงานกดจาก LIFF</h2>
+        </div>
+        <div class="head-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div class="filter-bar">
+            <div class="filter-group">
+              <span class="filter-label">วัน</span>
+              <select id="liffDayFilter" class="filter-select">
+                <option value="">ทั้งหมด</option>
+              </select>
+            </div>
+            <div class="filter-divider"></div>
+            <div class="filter-group">
+              <span class="filter-label">เดือน</span>
+              <select id="liffMonthFilter" class="filter-select">
+                <option value="">ทั้งหมด</option>
+              </select>
+            </div>
+          </div>
+          <button id="deleteSelectedLiffButton" type="button" class="soft-button danger-action"
+            style="display: none;">ลบที่เลือก (0)</button>
+          <button id="clearLiffHistoryButton" type="button" class="soft-button">ล้างประวัติ LIFF</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center; vertical-align: middle;"><input type="checkbox"
+                  id="selectAllLiff"
+                  style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></th>
+              <th>วันที่</th>
+              <th>พนักงาน</th>
+              <th>แผนก</th>
+              <th>สถานะ</th>
+              <th>เวลาเริ่ม/เลิก</th>
+              <th>OT</th>
+              <th>ส่งเมื่อ</th>
+              <th>จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="liffHistoryBody">
+            <tr>
+              <td colspan="9" class="empty-state">ยังไม่มีประวัติจาก LIFF</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <p>Last case history</p>
+          <h2>ประวัติเคสสุดท้ายรายวัน</h2>
+        </div>
+        <div class="head-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div class="filter-bar">
+            <div class="filter-group">
+              <span class="filter-label">วัน</span>
+              <select id="caseDayFilter" class="filter-select">
+                <option value="">ทั้งหมด</option>
+              </select>
+            </div>
+            <div class="filter-divider"></div>
+            <div class="filter-group">
+              <span class="filter-label">เดือน</span>
+              <select id="caseMonthFilter" class="filter-select">
+                <option value="">ทั้งหมด</option>
+              </select>
+            </div>
+          </div>
+          <button id="deleteSelectedCaseButton" type="button" class="soft-button danger-action"
+            style="display: none;">ลบที่เลือก (0)</button>
+          <button id="clearCaseHistoryButton" type="button" class="soft-button">ล้างประวัติเคส</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center; vertical-align: middle;"><input type="checkbox"
+                  id="selectAllCase"
+                  style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></th>
+              <th>วันที่</th>
+              <th>ทำอะไร</th>
+              <th>เวลาเสร็จ</th>
+              <th>รายละเอียด</th>
+              <th>จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="caseHistoryBody">
+            <tr>
+              <td colspan="6" class="empty-state">ยังไม่มีประวัติเคสสุดท้าย</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="./app.js"></script>
+</body>
+
+</html>

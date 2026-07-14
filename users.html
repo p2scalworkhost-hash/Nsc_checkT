@@ -1,0 +1,138 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NSC Users</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      .modal-overlay {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.4); z-index: 999;
+        display: flex; align-items: center; justify-content: center;
+        padding: 16px;
+      }
+      .modal-card {
+        background: #fff; border-radius: 12px; max-width: 480px; width: 100%;
+        box-shadow: 0 24px 64px rgba(0,0,0,0.25); overflow: hidden;
+      }
+      .modal-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 20px; border-bottom: 1px solid var(--border);
+      }
+      .modal-head h3 { margin: 0; font-size: 18px; color: var(--rose-deep); }
+      .modal-body { padding: 20px; display: grid; gap: 14px; }
+      .modal-body label { font-weight: 800; font-size: 13px; color: #3a2b31; }
+      .modal-body label span { font-weight: 400; color: var(--ink); }
+      .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 20px 20px; }
+      .modal-actions button { min-height: 44px; }
+      .user-row { cursor: pointer; transition: background 0.15s; }
+      .user-row:hover { background: var(--rose-soft); }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <img src="./assets/nsc-logo.svg" alt="NSC Specialist Surgery" />
+        <div>
+          <p>Payroll Audit Tool</p>
+          <h1>User Management</h1>
+        </div>
+      </header>
+
+      <nav class="page-nav" aria-label="OT calculator navigation">
+        <a href="./index.html">คำนวณ OT</a>
+        <a href="./settings.html">Settings</a>
+        <a href="./history.html">History</a>
+        <a class="active" href="./users.html">Users</a>
+      </nav>
+
+      <section class="panel settings-panel">
+        <div class="panel-head">
+          <div>
+            <p>User Department</p>
+            <h2>จัดการแผนกและ Role พนักงาน</h2>
+          </div>
+          <div class="summary-pill">
+            <span id="totalUsersCount">0 คน</span>
+            <strong id="liffLinkedCount">0 LIFF</strong>
+          </div>
+        </div>
+        <p class="hint">คลิกที่แถวพนักงานเพื่อเปิดหน้าต่างแก้ไขแผนก ข้อมูลจะอัปเดตไปยัง Firebase โดยตรง</p>
+
+        <div class="table-wrap">
+          <table class="rules-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>ชื่อ-นามสกุล</th>
+                <th>ชื่อเล่น</th>
+                <th>แผนก</th>
+                <th>Role (Position)</th>
+                <th>LIFF Status</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody">
+              <tr>
+                <td colspan="6" class="empty-state">กำลังโหลดข้อมูล...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p>How it works</p>
+            <h2>การทำงานของ User Management</h2>
+          </div>
+        </div>
+        <div class="rules-grid">
+          <article>
+            <span>1. CLICK</span>
+            <strong>คลิกที่ชื่อพนักงาน</strong>
+            <p>คลิกที่แถวพนักงานเพื่อดูรายละเอียดและเปลี่ยนแผนก</p>
+          </article>
+          <article>
+            <span>2. EDIT</span>
+            <strong>เปลี่ยนแผนก</strong>
+            <p>เลือกแผนกใหม่จาก dropdown แล้วกดบันทึก — ข้อมูลอัปเดต Firebase ทันที</p>
+          </article>
+          <article>
+            <span>3. OT CALC</span>
+            <strong>คำนวณ OT ตามแผนกใหม่</strong>
+            <p>ระบบ OT Calculator จะใช้แผนกที่แก้ไขแล้วในการคำนวณค่า OT โดยอัตโนมัติ</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal -->
+    <div id="userModal" class="modal-overlay" style="display:none">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="modalUserName">-</h3>
+          <button id="closeModalButton" type="button" style="background:transparent;color:var(--muted);font-size:24px;font-weight:900;border:0;cursor:pointer">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label>ชื่อ-นามสกุล <span id="modalFullName" style="font-weight:400">-</span></label>
+          <label>ชื่อเล่น <span id="modalNickname" style="font-weight:400">-</span></label>
+          <label>รหัสพนักงาน <span id="modalEmployeeId" style="font-weight:400">-</span></label>
+          <label>LINE User ID <span id="modalLineUserId" style="font-weight:400">-</span></label>
+          <label>แผนก</label>
+          <select id="modalDepartment" style="min-height:48px;padding:10px 12px;font-weight:900"></select>
+        </div>
+        <div class="modal-actions">
+          <button id="saveModalButton" type="button" class="primary-button">บันทึก</button>
+          <button id="cancelModalButton" type="button" class="soft-button">ยกเลิก</button>
+        </div>
+        <p id="modalMessage" class="import-message" style="padding:0 20px 12px"></p>
+      </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
