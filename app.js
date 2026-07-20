@@ -1010,6 +1010,14 @@ function renderRow(row) {
   const noOtIntentNote = row.hasOtWithoutIntent
     ? `<div class="status warn">ไม่คิดเงิน เพราะไม่ได้กดว่ามี OT</div>`
     : "";
+  const otNoteFromLiff = row.liffLog?.otNote
+    ? `<div class="status ok" style="margin-top:4px;">📝 ${escapeHtml(row.liffLog.otNote)}</div>`
+    : "";
+  const otIntentBadge = row.liffLog
+    ? (row.liffLog.employeeOtIntent
+        ? `<div class="status ok">✅ พนักงานกดว่ามี OT</div>`
+        : `<div class="status warn">❌ ยังไม่ได้กด OT / ไม่มี OT</div>`)
+    : "";
 
   return `
     <tr>
@@ -1023,7 +1031,7 @@ function renderRow(row) {
       <td>
         คิดเงินได้ ${formatDuration(row.payableOtMinutes)}<br>
         <small>สแกนจริง ${formatDuration(row.actualOtMinutes)}</small><br>
-        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}
+        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}${otIntentBadge}${otNoteFromLiff}
       </td>
       <td class="amount">${formatMoney(row.amount)}</td>
       <td>
@@ -1621,7 +1629,7 @@ function renderLiffHistory() {
   updateLiffBulkDeleteButton();
 
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty-state">${selectedYm ? "ไม่มีประวัติในเดือนที่เลือก" : "ยังไม่มีประวัติจาก LIFF"}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="empty-state">${selectedYm ? "ไม่มีประวัติในเดือนที่เลือก" : "ยังไม่มีประวัติจาก LIFF"}</td></tr>`;
     return;
   }
 
@@ -1634,6 +1642,9 @@ function renderLiffHistory() {
     .map(
       (item) => {
         const docId = item.id || `${item.lineUserId}_${item.cycleDate || item.workDate}`;
+        const otNoteText = item.workStatus === "work" && item.employeeOtIntent && item.otNote
+          ? escapeHtml(item.otNote)
+          : "-";
         return `
         <tr>
           <td style="text-align: center; vertical-align: middle;"><input type="checkbox" class="liff-row-checkbox" data-id="${escapeHtml(docId)}" style="width: 18px; min-height: 18px; cursor: pointer; accent-color: var(--rose);" /></td>
@@ -1643,7 +1654,8 @@ function renderLiffHistory() {
           <td>${escapeHtml(item.workStatusLabel || item.workStatus || "-")}</td>
           <td>${item.plannedStartTime ? `${item.plannedStartTime} / ${item.plannedEndTime}` : "-"}</td>
           <td>${item.workStatus === "work" ? item.employeeOtIntent ? "มี OT" : "ไม่มี OT / ยังไม่ตอบ" : "-"}</td>
-          <td>${formatDateTime(item.otAnsweredAt || item.submittedAt)}</td>
+          <td>${otNoteText}</td>
+          <td>${escapeHtml(formatDateTime(item.otAnsweredAt || item.submittedAt))}</td>
           <td>
             <button class="mini-action danger-action" type="button" data-delete-liff-key="${escapeHtml(docId)}">ลบ</button>
           </td>
