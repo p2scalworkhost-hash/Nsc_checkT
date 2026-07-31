@@ -5,6 +5,7 @@ const LIFF_HISTORY_KEY = "nsc-liff-attendance-history";
 const LATE_RULE_KEY = "nsc-late-rule";
 const USER_OVERRIDES_KEY = "nsc-user-department-overrides";
 const OT_RULE_KEY = "nsc-ot-rule";
+const SPECIAL_OT_KEY = "nsc-special-ot-assignments";
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -26,6 +27,8 @@ let lastCasesCache = {};
 let liffHistoryCache = [];
 let userOverridesCache = {};
 let profilesCache = [];
+let specialOtAssignmentsCache = [];
+const specialOtSelectedEmployeeKeys = new Set();
 
 // ── Pagination state ──
 const PAGE_SIZE = 25;
@@ -196,14 +199,31 @@ function renderUsersPage() {
       position: effectiveDept,
       currentDepartment: effectiveDept,
       hasLiff: getUserLiffStatus(profile.fullName),
+      _profileIndex: profilesCache.indexOf(profile),
     };
   });
 
   document.querySelector("#totalUsersCount").textContent = users.length + " คน";
   document.querySelector("#liffLinkedCount").textContent = users.filter(function (u) { return u.hasLiff; }).length + " LIFF";
 
-  body.innerHTML = users.map(function (user, i) {
-    return '<tr class="user-row" data-user-index="' + i + '">' +
+  // Apply name search filtering
+  var nameSearchEl = document.querySelector("#usersNameSearch");
+  var nameQuery = nameSearchEl ? nameSearchEl.value.trim().toLowerCase() : "";
+  var filteredUsers = nameQuery
+    ? users.filter(function (u) {
+        var full = (u.fullName || "").toLowerCase();
+        var nick = (u.nickname || "").toLowerCase();
+        return full.includes(nameQuery) || nick.includes(nameQuery);
+      })
+    : users;
+
+  if (!filteredUsers.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">ไม่พบพนักงานที่ตรงกับ "' + escapeHtml(nameQuery) + '"</td></tr>';
+    return;
+  }
+
+  body.innerHTML = filteredUsers.map(function (user, i) {
+    return '<tr class="user-row" data-user-index="' + user._profileIndex + '">' +
       "<td>" + (i + 1) + "</td>" +
       "<td><strong>" + escapeHtml(user.fullName) + "</strong></td>" +
       "<td>" + escapeHtml(user.nickname) + "</td>" +
@@ -213,7 +233,7 @@ function renderUsersPage() {
       "</tr>";
   }).join("");
 
-  // Bind click to open modal
+  // Bind click to open modal (use _profileIndex to map back to profilesCache)
   var rows = document.querySelectorAll(".user-row");
   for (var i = 0; i < rows.length; i++) {
     rows[i].addEventListener("click", function () {
@@ -297,6 +317,303 @@ async function saveUserModal(profile) {
     var modal = document.querySelector("#userModal");
     if (modal) modal.style.display = "none";
   }, 1200);
+}
+
+const specialOtReasonLabels = {
+  patient_watch: "เฝ้าคนไข้",
+  recovery_care: "ดูแลหลังผ่าตัด / รอคนไข้ฟื้น",
+  continuous_case: "เคสต่อเนื่องข้ามวัน",
+  other: "อื่น ๆ",
+};
+
+function loadSpecialOtAssignmentsFromLocal() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SPECIAL_OT_KEY));
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSpecialOtAssignmentsLocally() {
+  localStorage.setItem(SPECIAL_OT_KEY, JSON.stringify(specialOtAssignmentsCache.slice(0, 500)));
+}
+
+function getSelectableSpecialOtEmployees() {
+  const employees = new Map();
+
+  profilesCache.forEach((profile) => {
+    const fullName = String(profile.fullName || "").trim();
+    const key = normalizeName(fullName);
+    if (!key) return;
+    employees.set(key, {
+      key,
+      fullName,
+      nickname: String(profile.nickname || "").trim(),
+      department: String(profile.department || profile.position || "").trim(),
+    });
+  });
+
+  rows.forEach((row) => {
+    const fullName = String(row.name || "").trim();
+    const key = normalizeName(fullName);
+    if (!key || employees.has(key)) return;
+    employees.set(key, {
+      key,
+      fullName,
+      nickname: "",
+      department: String(row.department || "").trim(),
+    });
+  });
+
+  return [...employees.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, "th"));
+}
+
+function updateSpecialOtSelectedCount() {
+  const count = document.querySelector("#specialOtSelectedCount");
+  if (count) count.textContent = `เลือกแล้ว ${specialOtSelectedEmployeeKeys.size} คน`;
+}
+
+function getFilteredSelectableSpecialOtEmployees() {
+  const query = String(document.querySelector("#specialOtEmployeeSearch")?.value || "").trim().toLowerCase();
+  return getSelectableSpecialOtEmployees().filter((employee) => {
+    if (!query) return true;
+    return `${employee.fullName} ${employee.nickname} ${employee.department}`.toLowerCase().includes(query);
+  });
+}
+
+function renderSpecialOtEmployeeOptions() {
+  const container = document.querySelector("#specialOtEmployeeList");
+  if (!container) return;
+
+  const query = String(document.querySelector("#specialOtEmployeeSearch")?.value || "").trim().toLowerCase();
+  const employees = getFilteredSelectableSpecialOtEmployees();
+
+  container.replaceChildren();
+  if (!employees.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = query ? "ไม่พบพนักงานที่ตรงกับคำค้น" : "ยังไม่มีรายชื่อจาก Firebase หรือไฟล์ Excel";
+    container.append(empty);
+    updateSpecialOtSelectedCount();
+    return;
+  }
+
+  employees.forEach((employee) => {
+    const label = document.createElement("label");
+    label.className = "employee-check-item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = employee.key;
+    checkbox.checked = specialOtSelectedEmployeeKeys.has(employee.key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) specialOtSelectedEmployeeKeys.add(employee.key);
+      else specialOtSelectedEmployeeKeys.delete(employee.key);
+      updateSpecialOtSelectedCount();
+    });
+
+    const text = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = employee.fullName;
+    const meta = document.createElement("small");
+    meta.textContent = [employee.nickname, employee.department].filter(Boolean).join(" · ") || "ไม่ระบุแผนก";
+    text.append(name, meta);
+    label.append(checkbox, text);
+    container.append(label);
+  });
+
+  updateSpecialOtSelectedCount();
+}
+
+function getNextCalendarDateValue(dateValue) {
+  const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return dateValue || "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  date.setDate(date.getDate() + 1);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getSpecialOtFormData() {
+  const employeesByKey = new Map(getSelectableSpecialOtEmployees().map((employee) => [employee.key, employee]));
+  const selectedEmployees = [...specialOtSelectedEmployeeKeys]
+    .map((key) => employeesByKey.get(key))
+    .filter(Boolean);
+
+  return {
+    workDate: normalizeDate(document.querySelector("#specialOtWorkDate")?.value),
+    endDate: normalizeDate(document.querySelector("#specialOtEndDate")?.value),
+    endTime: normalizeTime(document.querySelector("#specialOtEndTime")?.value),
+    reason: document.querySelector("#specialOtReason")?.value || "patient_watch",
+    status: document.querySelector("#specialOtStatus")?.value || "pending",
+    note: String(document.querySelector("#specialOtNote")?.value || "").trim(),
+    employeeKeys: selectedEmployees.map((employee) => employee.key),
+    employees: selectedEmployees.map((employee) => ({
+      key: employee.key,
+      fullName: employee.fullName,
+      nickname: employee.nickname,
+      department: employee.department,
+    })),
+  };
+}
+
+async function saveSpecialOtAssignment() {
+  const message = document.querySelector("#specialOtMessage");
+  const button = document.querySelector("#saveSpecialOtButton");
+  const data = getSpecialOtFormData();
+
+  if (!data.workDate || !data.endDate || !data.endTime) {
+    message.textContent = "กรุณาระบุวันที่รอบงานและวันเวลาสิ้นสุด OT ให้ครบ";
+    return;
+  }
+  if (data.endDate < data.workDate) {
+    message.textContent = "วันสิ้นสุด OT ต้องไม่อยู่ก่อนวันที่รอบงาน";
+    return;
+  }
+  if (!data.employeeKeys.length) {
+    message.textContent = "กรุณาเลือกพนักงานอย่างน้อย 1 คน";
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const id = `special-ot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const assignment = { ...data, id, createdAt: now, updatedAt: now };
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "กำลังบันทึก…";
+  message.textContent = "";
+
+  try {
+    if (db) {
+      await db.collection("special_ot_assignments").doc(id).set(assignment);
+    }
+    specialOtAssignmentsCache = [assignment, ...specialOtAssignmentsCache.filter((item) => item.id !== id)];
+    persistSpecialOtAssignmentsLocally();
+    renderSpecialOtAssignments();
+    if (document.querySelector("#resultBody")) render();
+
+    specialOtSelectedEmployeeKeys.clear();
+    document.querySelector("#specialOtNote").value = "";
+    renderSpecialOtEmployeeOptions();
+    message.textContent = `บันทึก OT พิเศษสำหรับ ${assignment.employees.length} คนแล้ว`;
+  } catch (err) {
+    console.error("Failed to save special OT assignment:", err);
+    message.textContent = `บันทึกไม่สำเร็จ: ${err.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function updateSpecialOtAssignmentStatus(id, status) {
+  const assignment = specialOtAssignmentsCache.find((item) => item.id === id);
+  if (!assignment) return;
+  const updated = { ...assignment, status, updatedAt: new Date().toISOString() };
+
+  try {
+    if (db) {
+      await db.collection("special_ot_assignments").doc(id).set(updated);
+    }
+    specialOtAssignmentsCache = specialOtAssignmentsCache.map((item) => item.id === id ? updated : item);
+    persistSpecialOtAssignmentsLocally();
+    renderSpecialOtAssignments();
+    if (document.querySelector("#resultBody")) render();
+  } catch (err) {
+    console.error("Failed to update special OT assignment:", err);
+    alert(`เปลี่ยนสถานะไม่สำเร็จ: ${err.message}`);
+  }
+}
+
+async function deleteSpecialOtAssignment(id) {
+  const assignment = specialOtAssignmentsCache.find((item) => item.id === id);
+  if (!assignment || !confirm(`ลบ OT พิเศษวันที่ ${formatDisplayDate(assignment.workDate)} ใช่หรือไม่?`)) return;
+
+  try {
+    if (db) {
+      await db.collection("special_ot_assignments").doc(id).delete();
+    }
+    specialOtAssignmentsCache = specialOtAssignmentsCache.filter((item) => item.id !== id);
+    persistSpecialOtAssignmentsLocally();
+    renderSpecialOtAssignments();
+    if (document.querySelector("#resultBody")) render();
+  } catch (err) {
+    console.error("Failed to delete special OT assignment:", err);
+    alert(`ลบไม่สำเร็จ: ${err.message}`);
+  }
+}
+
+function renderSpecialOtAssignments() {
+  const list = document.querySelector("#specialOtAssignmentList");
+  const count = document.querySelector("#specialOtAssignmentCount");
+  if (!list) return;
+
+  const assignments = [...specialOtAssignmentsCache]
+    .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+  if (count) count.textContent = `${assignments.length} รายการ`;
+  list.replaceChildren();
+
+  if (!assignments.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "ยังไม่มี OT พิเศษ";
+    list.append(empty);
+    return;
+  }
+
+  assignments.forEach((assignment) => {
+    const card = document.createElement("article");
+    card.className = `special-ot-card ${assignment.status === "approved" ? "" : "pending"}`.trim();
+
+    const head = document.createElement("div");
+    head.className = "special-ot-card-head";
+    const title = document.createElement("strong");
+    title.textContent = `${formatDisplayDate(assignment.workDate)} · ${specialOtReasonLabels[assignment.reason] || assignment.reason}`;
+    const badge = document.createElement("span");
+    badge.className = `status ${assignment.status === "approved" ? "ok" : "warn"}`;
+    badge.textContent = assignment.status === "approved" ? "อนุมัติแล้ว" : "รอตรวจสอบ";
+    head.append(title, badge);
+
+    const end = document.createElement("p");
+    end.textContent = `คิด OT ได้ถึง ${formatDisplayDate(assignment.endDate)} เวลา ${assignment.endTime}`;
+    const tags = document.createElement("div");
+    tags.className = "employee-tags";
+    (assignment.employees || []).forEach((employee) => {
+      const tag = document.createElement("span");
+      tag.className = "employee-tag";
+      tag.textContent = employee.fullName;
+      tags.append(tag);
+    });
+
+    if (assignment.note) {
+      const note = document.createElement("p");
+      note.textContent = assignment.note;
+      card.append(head, end, tags, note);
+    } else {
+      card.append(head, end, tags);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "employee-picker-actions";
+    if (assignment.status !== "approved") {
+      const approve = document.createElement("button");
+      approve.className = "mini-action";
+      approve.type = "button";
+      approve.textContent = "อนุมัติ";
+      approve.addEventListener("click", () => updateSpecialOtAssignmentStatus(assignment.id, "approved"));
+      actions.append(approve);
+    }
+    const remove = document.createElement("button");
+    remove.className = "mini-action danger-action";
+    remove.type = "button";
+    remove.textContent = "ลบ";
+    remove.addEventListener("click", () => deleteSpecialOtAssignment(assignment.id));
+    actions.append(remove);
+    card.append(actions);
+    list.append(card);
+  });
 }
 
 const sampleRows = [
@@ -658,6 +975,34 @@ function getDepartmentRule(department) {
   };
 }
 
+function findSpecialOtAssignment(row) {
+  const employeeKey = normalizeName(row.name);
+  const workDate = normalizeDate(row.workDate);
+  if (!employeeKey || !workDate) return null;
+
+  return [...specialOtAssignmentsCache]
+    .filter((assignment) => {
+      const employeeKeys = Array.isArray(assignment.employeeKeys)
+        ? assignment.employeeKeys
+        : (assignment.employees || []).map((employee) => normalizeName(employee.fullName));
+      return normalizeDate(assignment.workDate) === workDate && employeeKeys.includes(employeeKey);
+    })
+    .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)))[0] || null;
+}
+
+function specialOtEndToMinutes(assignment, workDate) {
+  if (!assignment?.endDate || !assignment?.endTime || !workDate) return null;
+  const workMatch = String(workDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const endMatch = String(assignment.endDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!workMatch || !endMatch) return null;
+
+  const workDay = Date.UTC(Number(workMatch[1]), Number(workMatch[2]) - 1, Number(workMatch[3]));
+  const endDay = Date.UTC(Number(endMatch[1]), Number(endMatch[2]) - 1, Number(endMatch[3]));
+  const dayDifference = Math.round((endDay - workDay) / 86400000);
+  if (dayDifference < 0) return null;
+  return dayDifference * 24 * 60 + sameDayTimeToMinutes(assignment.endTime);
+}
+
 function calculateSplitRateAmount(otStart, otEnd, rule) {
   const nightStart = 23 * 60;
   const nextMorning = 32 * 60;
@@ -688,6 +1033,7 @@ function calculateRow(row) {
   const department = getEffectiveDepartment(row) || liffLog?.department || "";
   const workDate = row.workDate || liffLog?.workDate || "";
   const rule = getDepartmentRule(department);
+  const specialOtAssignment = findSpecialOtAssignment({ ...row, workDate });
   if (!startTime) {
     return {
       ...row,
@@ -705,7 +1051,15 @@ function calculateRow(row) {
   const lateMinutes = rawLateMinutes;
   const lateDeduction = lateMinutes === null ? 0 : lateMinutes * Number(lateRule.ratePerMinute || 0);
   const scheduledEnd = startMinutes + 9 * 60;
-  const outMinutes = timeToMinutes(row.scanOut, startMinutes);
+  const specialOtEndCandidate = specialOtAssignment
+    ? specialOtEndToMinutes(specialOtAssignment, workDate)
+    : null;
+  let outMinutes = timeToMinutes(row.scanOut, startMinutes);
+  // เวลาเข้าและออกเท่ากัน เช่น 08:00 → 08:00 ต้องใช้วันที่สิ้นสุด OT พิเศษ
+  // เพื่อยืนยันว่าเวลาออกเป็น 08:00 ของวันถัดไป ไม่ใช่เวลาเดียวกันในวันเดิม
+  if (specialOtEndCandidate >= 24 * 60 && outMinutes === startMinutes) {
+    outMinutes += 24 * 60;
+  }
   const earlyLeaveMinutes = Math.max(0, scheduledEnd - outMinutes);
 
   // Dynamic OT threshold logic
@@ -716,7 +1070,13 @@ function calculateRow(row) {
   const actualOtMinutes = isOtEligible ? roundMinutes(rawOtMinutes) : 0;
 
   const lastCaseTime = row.lastCaseEnd || getSavedLastCaseTime(workDate);
-  const missingLastCase = !lastCaseTime;
+  const specialOtApproved = specialOtAssignment?.status === "approved";
+  const specialOtPending = Boolean(specialOtAssignment && !specialOtApproved);
+  const specialOtEndMinutes = specialOtApproved
+    ? specialOtEndCandidate
+    : null;
+  const hasValidSpecialOtEnd = specialOtEndMinutes !== null && specialOtEndMinutes >= scheduledEnd;
+  const missingLastCase = !lastCaseTime && !hasValidSpecialOtEnd;
   const lastCaseMinutes = lastCaseTime ? timeToMinutes(lastCaseTime, startMinutes) : null;
   const cutoff = lastCaseMinutes === null ? null : lastCaseMinutes + rule.bufferMinutes;
   // overCaseLimit: only meaningful when last case ends AFTER the scheduled end time.
@@ -725,7 +1085,11 @@ function calculateRow(row) {
   // Scenario B — last case before scheduledEnd (e.g., case 12:42, end 18:00):
   //   employee working normal hours → no case-limit concern at all.
   const lastCaseAfterScheduledEnd = lastCaseMinutes !== null && lastCaseMinutes > scheduledEnd;
-  const effectiveCutoff = lastCaseAfterScheduledEnd ? cutoff : null;
+  // OT พิเศษที่อนุมัติแล้วมีลำดับเหนือเคสสุดท้าย + buffer และผูกกับพนักงานรายคน
+  const effectiveCutoff = hasValidSpecialOtEnd
+    ? specialOtEndMinutes
+    : lastCaseAfterScheduledEnd ? cutoff : null;
+  const cutoffSource = hasValidSpecialOtEnd ? "special_ot" : effectiveCutoff !== null ? "last_case" : "";
   const overCaseLimit = effectiveCutoff !== null && outMinutes > effectiveCutoff;
   const hasOtIntent = Boolean(liffLog?.employeeOtIntent);
   const hasOtWithoutIntent = actualOtMinutes > 0 && !hasOtIntent;
@@ -741,7 +1105,11 @@ function calculateRow(row) {
   // missingLastCase only matters when employee is actually working OT.
   // If they leave on time, there is nothing to cap or flag.
   const otNeedsLastCase = isOtEligible && hasOtIntent;
-  if (missingLastCase && otNeedsLastCase) {
+  if (specialOtPending && otNeedsLastCase) {
+    amount = 0;
+    payableOtMinutes = 0;
+    breakdown = "OT พิเศษรอตรวจสอบ";
+  } else if (missingLastCase && otNeedsLastCase) {
     amount = 0;
     payableOtMinutes = 0;
     breakdown = "ยังไม่มีข้อมูลเคสสุดท้าย";
@@ -767,6 +1135,9 @@ function calculateRow(row) {
     startTime,
     department,
     liffLog,
+    specialOtAssignment,
+    specialOtApproved,
+    specialOtPending,
     scanIn: row.scanIn,
     lateMinutes,
     lateDeductibleMinutes: lateMinutes || 0,
@@ -787,6 +1158,7 @@ function calculateRow(row) {
     lastCaseTime,
     missingLastCase,
     cutoff: effectiveCutoff === null ? "" : minutesToTime(effectiveCutoff),
+    cutoffSource,
     overCaseLimit,
     newDayAfter8: rule.useNightRate && outMinutes > 32 * 60,
   };
@@ -995,14 +1367,17 @@ function renderRow(row) {
 
   // missingLastCase is only relevant (warn) when the employee actually has OT intent and is eligible.
   const warnMissingLastCase = row.missingLastCase && row.actualOtMinutes > 0 && row.hasOtIntent;
-  const statusClass = row.hasOtWithoutIntent || row.overCaseLimit || warnMissingLastCase ? "warn" : "ok";
+  const warnSpecialOtPending = row.specialOtPending && row.actualOtMinutes > 0 && row.hasOtIntent;
+  const statusClass = row.hasOtWithoutIntent || row.overCaseLimit || warnMissingLastCase || warnSpecialOtPending ? "warn" : "ok";
   const statusText = row.hasOtWithoutIntent
     ? "สแกนเกิน แต่ LIFF ไม่ได้กด OT"
-    : warnMissingLastCase
-      ? "ยังไม่มีข้อมูลเคสสุดท้ายของวันนี้"
-      : row.overCaseLimit
-        ? "เกินเวลาเคส ให้ HR ตรวจ"
-        : "อยู่ในเงื่อนไข";
+    : warnSpecialOtPending
+      ? "OT พิเศษรอตรวจสอบ"
+      : warnMissingLastCase
+        ? "ยังไม่มีข้อมูลเคสสุดท้ายของวันนี้"
+        : row.overCaseLimit
+          ? row.cutoffSource === "special_ot" ? "เกินเวลา OT ที่อนุมัติ" : "เกินเวลาเคส ให้ HR ตรวจ"
+          : "อยู่ในเงื่อนไข";
   const newDayNote = row.newDayAfter8 ? `<div class="status warn">หลัง 08:00 นับวันใหม่</div>` : "";
   const excessNote = row.excessAfterCaseMinutes
     ? `<div class="status warn">เกิน cutoff ${formatDuration(row.excessAfterCaseMinutes)} ไม่คิดเงินอัตโนมัติ</div>`
@@ -1018,6 +1393,13 @@ function renderRow(row) {
         ? `<div class="status ok">✅ พนักงานกดว่ามี OT</div>`
         : `<div class="status warn">❌ ยังไม่ได้กด OT / ไม่มี OT</div>`)
     : "";
+  const specialOtBadge = row.specialOtAssignment
+    ? `<div class="status ${row.specialOtApproved ? "ok" : "warn"}">งานต่อเนื่อง: ${escapeHtml(specialOtReasonLabels[row.specialOtAssignment.reason] || row.specialOtAssignment.reason)}</div>`
+    : "";
+  const approvalSource = row.specialOtAssignment
+    ? `OT พิเศษ ${row.specialOtApproved ? "อนุมัติแล้ว" : "รอตรวจสอบ"}<br>
+       <small>ถึง ${escapeHtml(formatDisplayDate(row.specialOtAssignment.endDate))} ${escapeHtml(row.specialOtAssignment.endTime || "-")}</small><br>`
+    : `เคสเสร็จ ${row.lastCaseTime || "-"}<br>`;
 
   return `
     <tr>
@@ -1031,11 +1413,11 @@ function renderRow(row) {
       <td>
         คิดเงินได้ ${formatDuration(row.payableOtMinutes)}<br>
         <small>สแกนจริง ${formatDuration(row.actualOtMinutes)}</small><br>
-        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}${otIntentBadge}${otNoteFromLiff}
+        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}${otIntentBadge}${otNoteFromLiff}${specialOtBadge}
       </td>
       <td class="amount">${formatMoney(row.amount)}</td>
       <td>
-        เคสเสร็จ ${row.lastCaseTime || "-"}<br>
+        ${approvalSource}
         ${row.cutoff ? `<small>ควรออกไม่เกิน ${row.cutoff}</small><br>` : ""}
         <span class="status ${statusClass}">${statusText}</span>
       </td>
@@ -1120,6 +1502,7 @@ function setRows(nextRows) {
       rowKey: row.rowKey || `${row.workDate || "nodate"}-${row.name || "noname"}-${index}`,
     })),
   );
+  renderSpecialOtEmployeeOptions();
   render();
 }
 
@@ -1619,6 +2002,16 @@ function renderLiffHistory() {
     filtered = filtered.filter(item => item.workDate === selectedDay);
   }
 
+  // Apply name search filtering
+  const nameSearchEl = document.querySelector("#liffNameSearch");
+  const nameQuery = nameSearchEl ? nameSearchEl.value.trim().toLowerCase() : "";
+  if (nameQuery) {
+    filtered = filtered.filter(item => {
+      const name = (item.fullName || item.nickname || "").toLowerCase();
+      return name.includes(nameQuery);
+    });
+  }
+
   // Remove existing pagination bar if any
   const existingLiffPagination = document.querySelector("#liffPaginationBar");
   if (existingLiffPagination) existingLiffPagination.remove();
@@ -1927,6 +2320,7 @@ let unsubscribeSettings = null;
 let unsubscribeProfiles = null;
 let unsubscribeLiffHistory = null;
 let unsubscribeLastCases = null;
+let unsubscribeSpecialOtAssignments = null;
 
 function listenToSettings() {
   if (!db) return;
@@ -1973,8 +2367,27 @@ function listenToProfiles() {
     });
     console.log("Profiles updated in real-time:", profilesCache.length);
     renderUsersPage();
+    renderSpecialOtEmployeeOptions();
     if (document.querySelector("#resultBody")) render();
   }, (err) => console.error("Failed to subscribe to profiles:", err));
+}
+
+function listenToSpecialOtAssignments() {
+  if (!db) return;
+  if (unsubscribeSpecialOtAssignments) unsubscribeSpecialOtAssignments();
+  unsubscribeSpecialOtAssignments = db.collection("special_ot_assignments")
+    .orderBy("createdAt", "desc")
+    .limit(500)
+    .onSnapshot((snapshot) => {
+      specialOtAssignmentsCache = [];
+      snapshot.forEach((doc) => {
+        specialOtAssignmentsCache.push({ id: doc.id, ...doc.data() });
+      });
+      persistSpecialOtAssignmentsLocally();
+      renderSpecialOtAssignments();
+      if (document.querySelector("#resultBody")) render();
+      console.log("Special OT assignments updated in real-time:", specialOtAssignmentsCache.length);
+    }, (err) => console.error("Failed to subscribe to special OT assignments:", err));
 }
 
 function listenToLiffHistory() {
@@ -2021,6 +2434,7 @@ async function init() {
   userOverridesCache = {};
   profilesCache = [];
   liffHistoryCache = [];
+  specialOtAssignmentsCache = loadSpecialOtAssignmentsFromLocal();
 
   if (document.querySelector("#caseDate")) {
     document.querySelector("#caseDate").value = formatDisplayDate(todayInputValue());
@@ -2040,6 +2454,13 @@ async function init() {
   renderLiffHistory();
   renderCaseHistory();
   renderUsersPage();
+  renderSpecialOtEmployeeOptions();
+  renderSpecialOtAssignments();
+
+  const specialOtWorkDate = document.querySelector("#specialOtWorkDate");
+  const specialOtEndDate = document.querySelector("#specialOtEndDate");
+  if (specialOtWorkDate) specialOtWorkDate.value = todayInputValue();
+  if (specialOtEndDate) specialOtEndDate.value = getNextCalendarDateValue(todayInputValue());
 
   // If Firebase is available, register real-time snapshot listeners to override caches and re-render
   if (db) {
@@ -2047,6 +2468,7 @@ async function init() {
     listenToProfiles();
     listenToLiffHistory();
     listenToLastCases();
+    listenToSpecialOtAssignments();
   }
 
   document.querySelector("#loadSampleButton")?.addEventListener("click", () => {
@@ -2060,6 +2482,7 @@ async function init() {
   document.querySelector("#saveLateRuleButton")?.addEventListener("click", saveLateRuleFromForm);
   document.querySelector("#saveOtRuleButton")?.addEventListener("click", saveOtRuleFromForm);
   document.querySelector("#saveCaseButton")?.addEventListener("click", saveCaseFromForm);
+  document.querySelector("#saveSpecialOtButton")?.addEventListener("click", saveSpecialOtAssignment);
   document.querySelector("#resetRulesButton")?.addEventListener("click", async () => {
     await saveRules(defaultRules);
     renderRules();
@@ -2100,6 +2523,20 @@ async function init() {
   });
   document.querySelector("#fileInput")?.addEventListener("change", (event) => {
     handleFile(event.target.files[0]);
+  });
+
+  document.querySelector("#specialOtEmployeeSearch")?.addEventListener("input", renderSpecialOtEmployeeOptions);
+  document.querySelector("#selectAllSpecialOtEmployees")?.addEventListener("click", () => {
+    getFilteredSelectableSpecialOtEmployees().forEach((employee) => specialOtSelectedEmployeeKeys.add(employee.key));
+    renderSpecialOtEmployeeOptions();
+  });
+  document.querySelector("#clearSpecialOtEmployees")?.addEventListener("click", () => {
+    specialOtSelectedEmployeeKeys.clear();
+    renderSpecialOtEmployeeOptions();
+  });
+  document.querySelector("#specialOtWorkDate")?.addEventListener("change", (event) => {
+    const endDate = document.querySelector("#specialOtEndDate");
+    if (endDate) endDate.value = getNextCalendarDateValue(event.target.value);
   });
 
   for (const id of ["lastCaseHour", "lastCaseMinute"]) {
@@ -2160,6 +2597,15 @@ async function init() {
     if (daySelect) daySelect.value = "";
     caseCurrentPage = 1;
     renderCaseHistory();
+  });
+
+  // Name search listeners
+  document.querySelector("#liffNameSearch")?.addEventListener("input", () => {
+    liffCurrentPage = 1;
+    renderLiffHistory();
+  });
+  document.querySelector("#usersNameSearch")?.addEventListener("input", () => {
+    renderUsersPage();
   });
 }
 
