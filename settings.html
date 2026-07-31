@@ -68,6 +68,99 @@
         </div>
       </section>
 
+      <section id="specialOtSettings" class="panel settings-panel special-ot-panel" aria-labelledby="specialOtHeading">
+        <div class="panel-head">
+          <div>
+            <p>Continuous duty exception</p>
+            <h2 id="specialOtHeading">OT พิเศษ / งานเฝ้าคนไข้</h2>
+          </div>
+          <span class="special-ot-mark">ข้อยกเว้นรายคน</span>
+        </div>
+        <p id="specialOtHelp" class="hint">ใช้เมื่อพนักงานทำงานต่อเนื่องข้ามวัน เช่น เฝ้าคนไข้หรือดูแลหลังผ่าตัด รายการที่อนุมัติแล้วจะใช้เป็นเวลาสิ้นสุด OT แทนเคสสุดท้าย + buffer เฉพาะคนที่เลือก</p>
+
+        <ol class="special-ot-flow" aria-label="ขั้นตอนตั้งค่า OT พิเศษ">
+          <li><span>1</span><strong>กำหนดรอบและเวลาสิ้นสุด</strong></li>
+          <li><span>2</span><strong>เลือกพนักงานหลายคน</strong></li>
+          <li><span>3</span><strong>ตรวจและอนุมัติ</strong></li>
+        </ol>
+
+        <div class="special-ot-layout">
+          <div class="setting-card special-ot-form" aria-describedby="specialOtHelp">
+            <div class="grid-two">
+              <label>
+                วันที่รอบงาน
+                <input id="specialOtWorkDate" type="date" required />
+              </label>
+              <label>
+                ประเภทงาน
+                <select id="specialOtReason">
+                  <option value="patient_watch">เฝ้าคนไข้</option>
+                  <option value="recovery_care">ดูแลหลังผ่าตัด / รอคนไข้ฟื้น</option>
+                  <option value="continuous_case">เคสต่อเนื่องข้ามวัน</option>
+                  <option value="other">อื่น ๆ</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grid-two">
+              <label>
+                วันที่สิ้นสุด OT
+                <input id="specialOtEndDate" type="date" required />
+              </label>
+              <label>
+                เวลาสิ้นสุด OT
+                <input id="specialOtEndTime" type="time" value="08:00" required />
+              </label>
+            </div>
+
+            <label>
+              สถานะการอนุมัติ
+              <select id="specialOtStatus">
+                <option value="pending">รอตรวจสอบ — ยังไม่คิดเงิน</option>
+                <option value="approved">อนุมัติแล้ว — นำไปคำนวณ</option>
+              </select>
+            </label>
+
+            <div class="employee-picker" role="group" aria-labelledby="specialOtEmployeeLabel">
+              <div class="employee-picker-head">
+                <strong id="specialOtEmployeeLabel">เลือกพนักงานได้หลายคน</strong>
+                <div class="employee-picker-actions">
+                  <button id="selectAllSpecialOtEmployees" class="mini-action" type="button">เลือกผลลัพธ์ทั้งหมด</button>
+                  <button id="clearSpecialOtEmployees" class="mini-action" type="button">ล้างที่เลือก</button>
+                </div>
+              </div>
+              <label class="visually-hidden" for="specialOtEmployeeSearch">ค้นหาพนักงาน</label>
+              <input id="specialOtEmployeeSearch" type="search" placeholder="ค้นหาชื่อ ชื่อเล่น หรือแผนก" autocomplete="off" />
+              <div id="specialOtEmployeeList" class="employee-check-list" aria-live="polite">
+                <p class="empty-state">กำลังโหลดรายชื่อพนักงาน…</p>
+              </div>
+              <p id="specialOtSelectedCount" class="picker-count" aria-live="polite">เลือกแล้ว 0 คน</p>
+            </div>
+
+            <label>
+              หมายเหตุ
+              <input id="specialOtNote" placeholder="เช่น เฝ้าคนไข้หลังผ่าตัดจนถึงเช้า" />
+            </label>
+
+            <button id="saveSpecialOtButton" class="primary-button" type="button">บันทึกรายการ OT พิเศษ</button>
+            <p id="specialOtMessage" class="import-message" role="status" aria-live="polite"></p>
+          </div>
+
+          <div class="special-ot-ledger" aria-label="รายการ OT พิเศษที่บันทึกแล้ว">
+            <div class="ledger-head">
+              <div>
+                <span>รายการที่บันทึก</span>
+                <strong id="specialOtAssignmentCount">0 รายการ</strong>
+              </div>
+              <small>รายการล่าสุดแสดงก่อน</small>
+            </div>
+            <div id="specialOtAssignmentList" class="special-ot-list" aria-live="polite">
+              <p class="empty-state">ยังไม่มี OT พิเศษ กรอกข้อมูลด้านซ้ายเพื่อเริ่มต้น</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="panel settings-panel">
         <div class="panel-head">
           <div>
