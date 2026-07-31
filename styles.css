@@ -145,6 +145,233 @@ h2 {
   gap: 14px;
 }
 
+.special-ot-panel {
+  scroll-margin-top: 16px;
+  border-color: #d6e6dd;
+  background:
+    linear-gradient(135deg, rgba(238, 245, 241, 0.88), rgba(255, 255, 255, 0.97) 48%),
+    #fff;
+}
+
+.special-ot-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.special-ot-flow li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #d6e6dd;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--sage);
+  font-size: 13px;
+}
+
+.special-ot-flow span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sage);
+  color: #fff;
+  font-weight: 900;
+}
+
+.special-ot-mark {
+  border: 1px solid #c7ddd1;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--sage);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.special-ot-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.special-ot-form {
+  border-color: #d6e6dd;
+}
+
+.employee-picker {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #d6e6dd;
+  border-radius: 8px;
+  background: var(--sage-soft);
+}
+
+.employee-picker-head,
+.employee-picker-actions,
+.ledger-head,
+.special-ot-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.employee-picker-head label,
+.employee-picker-head > strong {
+  color: var(--sage);
+  font-weight: 900;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.inline-link {
+  color: var(--rose-deep);
+  font-weight: 900;
+}
+
+.employee-check-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.employee-check-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid #d6e6dd;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.employee-check-item:has(input:checked) {
+  border-color: var(--sage);
+  box-shadow: inset 0 0 0 1px var(--sage);
+}
+
+.employee-check-item input {
+  width: 17px;
+  min-height: 17px;
+  accent-color: var(--sage);
+}
+
+.employee-check-item strong,
+.employee-check-item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.employee-check-item small,
+.picker-count,
+.ledger-head small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.picker-count {
+  margin: 0;
+  font-weight: 800;
+}
+
+.special-ot-ledger {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ledger-head {
+  padding: 11px 12px;
+  border: 1px solid #d6e6dd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ledger-head span,
+.ledger-head strong {
+  display: block;
+}
+
+.ledger-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ledger-head strong {
+  color: var(--sage);
+  font-size: 18px;
+}
+
+.special-ot-list {
+  display: grid;
+  gap: 9px;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+.special-ot-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d6e6dd;
+  border-left: 4px solid var(--sage);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.special-ot-card.pending {
+  border-left-color: var(--gold);
+}
+
+.special-ot-card p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.special-ot-card .employee-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.employee-tag {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--sage-soft);
+  color: var(--sage);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .settings-panel {
   display: grid;
   gap: 14px;
@@ -428,6 +655,19 @@ button {
   font-weight: 900;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(200, 50, 82, 0.28);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .primary-button {
   width: 100%;
   background: var(--rose);
@@ -647,6 +887,12 @@ code {
   }
 
   .department-form {
+    grid-template-columns: 1fr;
+  }
+
+  .special-ot-layout,
+  .employee-check-list,
+  .special-ot-flow {
     grid-template-columns: 1fr;
   }
 
