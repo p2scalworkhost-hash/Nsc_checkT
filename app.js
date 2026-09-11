@@ -1029,7 +1029,7 @@ function calculateSplitRateAmount(otStart, otEnd, rule) {
 
 function calculateRow(row) {
   const liffLog = findLiffLog(row);
-  const startTime = row.startTime || liffLog?.plannedStartTime || "";
+  const startTime = row.startTime || liffLog?.plannedStartTime || row.scanIn || "";
   const department = getEffectiveDepartment(row) || liffLog?.department || "";
   const workDate = row.workDate || liffLog?.workDate || "";
   const rule = getDepartmentRule(department);
@@ -1165,7 +1165,10 @@ function calculateRow(row) {
 }
 
 function normalizeName(value) {
-  return String(value || "").replace(/\s+/g, "").toLowerCase();
+  return String(value || "")
+    .replace(/^(นาย|นางสาว|นางสาง|นาง|คุณ|น้อง)\s*/u, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
 }
 
 function getExcelDateKey(dateValue) {
@@ -1262,7 +1265,7 @@ function render() {
     
     html.push(`
       <tr class="summary-row" data-name="${escapeHtml(key)}" style="cursor: pointer; background: #fdfdfd; border-top: 2px solid #eee;">
-        <td><strong>▶ ${escapeHtml(group.name)}</strong><br><small>${days} วัน</small></td>
+        <td class="col-freeze" style="background:#fdfdfd"><strong>▶ ${escapeHtml(group.name)}</strong><br><small>${days} วัน</small></td>
         <td>-</td>
         <td>${renderGroupDepartmentSelect(group)}</td>
         <td>-</td>
@@ -1351,7 +1354,7 @@ function renderRow(row) {
   if (row.missingStartTime) {
     return `
         <tr>
-          <td><strong>${escapeHtml(row.name)}</strong></td>
+          <td class="col-freeze"><strong>${escapeHtml(row.name)}</strong></td>
         <td>${escapeHtml(formatDisplayDate(row.workDate))}</td>
         <td>${renderDepartmentSelect(row)}</td>
         <td><span class="status danger">ไม่พบเวลาเริ่มจาก LIFF/Excel</span></td>
@@ -1403,7 +1406,7 @@ function renderRow(row) {
 
   return `
     <tr>
-      <td><strong>${escapeHtml(row.name)}</strong></td>
+      <td class="col-freeze"><strong>${escapeHtml(row.name)}</strong></td>
       <td>${escapeHtml(formatDisplayDate(row.workDate))}</td>
       <td>${renderDepartmentSelect(row)}</td>
       <td>${row.startTime}<br><small>เลิกปกติ ${row.scheduledEnd}</small>${row.liffLog ? '<br><small>จาก LIFF</small>' : ""}</td>

@@ -483,6 +483,14 @@ h3 {
   }
 }
 
+.col-freeze,
+th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--paper);
+}
+
 .hint {
   color: var(--muted);
   font-size: 13px;
@@ -767,10 +775,15 @@ td {
 }
 
 th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
+  box-shadow: 0 1px 0 var(--border);
 }
 
 td {
@@ -780,6 +793,14 @@ td {
 .amount {
   color: var(--rose-deep);
   font-weight: 900;
+}
+
+.col-freeze {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fff;
+  box-shadow: 2px 0 6px -2px rgba(75, 36, 47, 0.12);
 }
 
 .mini-action {
