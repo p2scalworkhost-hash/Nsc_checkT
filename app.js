@@ -1027,9 +1027,26 @@ function calculateSplitRateAmount(otStart, otEnd, rule) {
   };
 }
 
+function inferShiftFromScanIn(scanIn) {
+  if (!scanIn) return "08:00";
+  const [h, m] = scanIn.split(":").map(Number);
+  if (Number.isNaN(h)) return "08:00";
+  const totalMinutes = h * 60 + (m || 0);
+  const roundedHour = Math.round(totalMinutes / 60);
+  const clampedHour = Math.max(0, Math.min(23, roundedHour));
+  return `${String(clampedHour).padStart(2, "0")}:00`;
+}
+
 function calculateRow(row) {
   const liffLog = findLiffLog(row);
-  const startTime = row.startTime || liffLog?.plannedStartTime || row.scanIn || "";
+  let startTime = row.startTime || liffLog?.plannedStartTime || "";
+  let isAutoShift = false;
+
+  if (!startTime && row.scanIn) {
+    startTime = inferShiftFromScanIn(row.scanIn);
+    isAutoShift = true;
+  }
+
   const department = getEffectiveDepartment(row) || liffLog?.department || "";
   const workDate = row.workDate || liffLog?.workDate || "";
   const rule = getDepartmentRule(department);
@@ -1133,6 +1150,7 @@ function calculateRow(row) {
     rowKey: row.rowKey,
     workDate,
     startTime,
+    isAutoShift,
     department,
     liffLog,
     specialOtAssignment,
@@ -1223,6 +1241,14 @@ function applyMonthlyLatePolicy(calculated) {
     let freeRemaining = freeMinutes;
 
     for (const row of groupRows) {
+      if (row.isAutoShift) {
+        row.monthlyLateMinutes = monthlyLateMinutes;
+        row.monthlyFreeMinutes = freeMinutes;
+        row.lateDeductibleMinutes = 0;
+        row.lateDeduction = 0;
+        continue;
+      }
+
       const lateMinutes = Number(row.lateMinutes || 0);
       const freeUsed = Math.min(freeRemaining, lateMinutes);
       const deductibleMinutes = Math.max(0, lateMinutes - freeUsed);
@@ -1371,7 +1397,7 @@ function renderRow(row) {
   // missingLastCase is only relevant (warn) when the employee actually has OT intent and is eligible.
   const warnMissingLastCase = row.missingLastCase && row.actualOtMinutes > 0 && row.hasOtIntent;
   const warnSpecialOtPending = row.specialOtPending && row.actualOtMinutes > 0 && row.hasOtIntent;
-  const statusClass = row.hasOtWithoutIntent || row.overCaseLimit || warnMissingLastCase || warnSpecialOtPending ? "warn" : "ok";
+  const statusClass = row.hasOtWithoutIntent || row.overCaseLimit || warnMissingLastCase || warnSpecialOtPending || row.isAutoShift ? "warn" : "ok";
   const statusText = row.hasOtWithoutIntent
     ? "สแกนเกิน แต่ LIFF ไม่ได้กด OT"
     : warnSpecialOtPending
@@ -1380,7 +1406,9 @@ function renderRow(row) {
         ? "ยังไม่มีข้อมูลเคสสุดท้ายของวันนี้"
         : row.overCaseLimit
           ? row.cutoffSource === "special_ot" ? "เกินเวลา OT ที่อนุมัติ" : "เกินเวลาเคส ให้ HR ตรวจ"
-          : "อยู่ในเงื่อนไข";
+          : row.isAutoShift
+            ? "ไม่พบ LIFF (ใช้กะอัตโนมัติ)"
+            : "อยู่ในเงื่อนไข";
   const newDayNote = row.newDayAfter8 ? `<div class="status warn">หลัง 08:00 นับวันใหม่</div>` : "";
   const excessNote = row.excessAfterCaseMinutes
     ? `<div class="status warn">เกิน cutoff ${formatDuration(row.excessAfterCaseMinutes)} ไม่คิดเงินอัตโนมัติ</div>`
@@ -1399,6 +1427,9 @@ function renderRow(row) {
   const specialOtBadge = row.specialOtAssignment
     ? `<div class="status ${row.specialOtApproved ? "ok" : "warn"}">งานต่อเนื่อง: ${escapeHtml(specialOtReasonLabels[row.specialOtAssignment.reason] || row.specialOtAssignment.reason)}</div>`
     : "";
+  const autoShiftNote = row.isAutoShift
+    ? `<div class="status warn" style="margin-top:4px;">⚠️ ไม่ได้กดกะผ่าน LIFF (ใช้กะมาตรฐาน ${row.startTime})</div>`
+    : "";
   const approvalSource = row.specialOtAssignment
     ? `OT พิเศษ ${row.specialOtApproved ? "อนุมัติแล้ว" : "รอตรวจสอบ"}<br>
        <small>ถึง ${escapeHtml(formatDisplayDate(row.specialOtAssignment.endDate))} ${escapeHtml(row.specialOtAssignment.endTime || "-")}</small><br>`
@@ -1409,14 +1440,14 @@ function renderRow(row) {
       <td class="col-freeze"><strong>${escapeHtml(row.name)}</strong></td>
       <td>${escapeHtml(formatDisplayDate(row.workDate))}</td>
       <td>${renderDepartmentSelect(row)}</td>
-      <td>${row.startTime}<br><small>เลิกปกติ ${row.scheduledEnd}</small>${row.liffLog ? '<br><small>จาก LIFF</small>' : ""}</td>
+      <td>${row.startTime}<br><small>เลิกปกติ ${row.scheduledEnd}</small>${row.liffLog ? '<br><small>จาก LIFF</small>' : row.isAutoShift ? '<br><small class="status warn">กะอัตโนมัติ (ไม่พบ LIFF)</small>' : ""}</td>
       <td>${row.scanOut}</td>
       <td>${renderLateCell(row)}</td>
       <td>${renderEarlyLeaveCell(row)}</td>
       <td>
         คิดเงินได้ ${formatDuration(row.payableOtMinutes)}<br>
         <small>สแกนจริง ${formatDuration(row.actualOtMinutes)}</small><br>
-        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}${otIntentBadge}${otNoteFromLiff}${specialOtBadge}
+        <small>${escapeHtml(row.breakdown)}</small>${newDayNote}${excessNote}${noOtIntentNote}${otIntentBadge}${otNoteFromLiff}${specialOtBadge}${autoShiftNote}
       </td>
       <td class="amount">${formatMoney(row.amount)}</td>
       <td>
@@ -1447,9 +1478,11 @@ function renderDepartmentSelect(row) {
 function renderLateCell(row) {
   if (!row.scanIn) return `<span class="status warn">ไม่มี scan in</span>`;
   if (!row.lateMinutes) return `${row.scanIn}<br><span class="status ok">ไม่สาย</span>`;
-  const deductibleText = row.lateDeductibleMinutes
-    ? `<small>หักจริง ${formatDuration(row.lateDeductibleMinutes)} = ${formatMoney(row.lateDeduction)}</small>`
-    : `<small>ยังอยู่ในโควตาฟรี ${formatDuration(row.monthlyFreeMinutes || 0)}/เดือน</small>`;
+  const deductibleText = row.isAutoShift
+    ? `<small class="status ok" style="display:inline-block; margin-top:2px;">ไม่หักเงิน (ไม่ได้ Check-in LIFF)</small>`
+    : row.lateDeductibleMinutes
+      ? `<small>หักจริง ${formatDuration(row.lateDeductibleMinutes)} = ${formatMoney(row.lateDeduction)}</small>`
+      : `<small>ยังอยู่ในโควตาฟรี ${formatDuration(row.monthlyFreeMinutes || 0)}/เดือน</small>`;
 
   return `
     ${row.scanIn}<br>
